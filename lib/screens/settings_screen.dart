@@ -4,6 +4,7 @@ import '../models/entities.dart';
 import '../state/app_controller.dart';
 import '../theme.dart';
 import '../widgets/formatters.dart';
+import 'trash_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({required this.controller, super.key});
@@ -128,6 +129,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           : '${stats.orphanCount} 个 · ${formatBytes(stats.orphanBytes)}',
                     ),
                     const Divider(height: 1, indent: 16),
+                    ListTile(
+                      leading: const Icon(Icons.delete_outline_rounded),
+                      title: const Text('回收站'),
+                      subtitle: const Text('恢复或永久删除漫画'),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => TrashScreen(
+                            controller: widget.controller,
+                          ),
+                        ),
+                      ).then((_) {
+                        _refreshStats();
+                        widget.controller.refresh();
+                      }),
+                    ),
                     ListTile(
                       leading: const Icon(Icons.cleaning_services_outlined),
                       title: const Text('清理缩略图缓存'),

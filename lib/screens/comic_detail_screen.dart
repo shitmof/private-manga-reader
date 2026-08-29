@@ -205,13 +205,13 @@ class ComicDetailScreen extends StatelessWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('删除这本漫画？'),
-        content: const Text('只删除漫画与图片引用。原图会进入待清理区，不会立即物理删除。'),
+        content: const Text('漫画会移到回收站，可以稍后恢复。原图不会立即删除。'),
         actions: <Widget>[
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('删除'),
+            child: const Text('移到回收站'),
           ),
         ],
       ),

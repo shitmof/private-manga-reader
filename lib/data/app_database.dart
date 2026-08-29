@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
@@ -15,12 +17,14 @@ class AppDatabase {
     if (existing != null && existing.isOpen) return existing;
     final path = overridePath ??
         p.join((await getApplicationSupportDirectory()).path, 'library.db');
+    await _ensureMigrationSnapshot(path);
     _database = await _factory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 1,
+        version: 2,
         onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _createSchema,
+        onUpgrade: _upgradeSchema,
       ),
     );
     return _database!;
@@ -57,6 +61,7 @@ class AppDatabase {
         updated_at TEXT NOT NULL,
         last_read_position INTEGER NOT NULL DEFAULT 0,
         last_read_offset REAL NOT NULL DEFAULT 0,
+        deleted_at TEXT,
         FOREIGN KEY(cover_asset_id) REFERENCES assets(id) ON DELETE SET NULL
       )
     ''');
@@ -83,5 +88,29 @@ class AppDatabase {
         value TEXT NOT NULL
       )
     ''');
+  }
+
+  Future<void> _upgradeSchema(
+    Database db,
+    int oldVersion,
+    int newVersion,
+  ) async {
+    if (oldVersion < 2) {
+      await db.execute('ALTER TABLE comics ADD COLUMN deleted_at TEXT');
+    }
+  }
+
+  Future<void> _ensureMigrationSnapshot(String databasePath) async {
+    final source = File(databasePath);
+    final snapshot = File('$databasePath.pre-v2');
+    if (!await source.exists() || await snapshot.exists()) return;
+    await snapshot.parent.create(recursive: true);
+    await source.copy(snapshot.path);
+    for (final suffix in const <String>['-wal', '-shm']) {
+      final companion = File('$databasePath$suffix');
+      if (await companion.exists()) {
+        await companion.copy('${snapshot.path}$suffix');
+      }
+    }
   }
 }

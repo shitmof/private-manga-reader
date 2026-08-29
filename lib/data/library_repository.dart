@@ -13,7 +13,12 @@ class LibraryRepository {
   static const _uuid = Uuid();
   final AppDatabase _database;
 
-  Future<List<ComicSummary>> loadLibrary() async {
+  Future<List<ComicSummary>> loadLibrary() => _loadLibrary(deleted: false);
+
+  Future<List<ComicSummary>> loadDeletedComics() =>
+      _loadLibrary(deleted: true);
+
+  Future<List<ComicSummary>> _loadLibrary({required bool deleted}) async {
     final db = await _database.instance;
     final rows = await db.rawQuery('''
       SELECT c.*,
@@ -28,8 +33,9 @@ class LibraryRepository {
         c.cover_asset_id,
         (SELECT asset_id FROM comic_items WHERE comic_id = c.id ORDER BY position LIMIT 1)
       )
+      WHERE c.deleted_at IS ${deleted ? 'NOT NULL' : 'NULL'}
       GROUP BY c.id
-      ORDER BY c.sort_index, c.created_at
+      ORDER BY ${deleted ? 'c.deleted_at DESC' : 'c.sort_index, c.created_at'}
     ''');
     return rows
         .map((row) => ComicSummary(
@@ -74,6 +80,7 @@ class LibraryRepository {
       'updated_at': now.toIso8601String(),
       'last_read_position': 0,
       'last_read_offset': 0.0,
+      'deleted_at': null,
     });
     return comic;
   }
@@ -93,7 +100,33 @@ class LibraryRepository {
 
   Future<void> deleteComic(String id) async {
     final db = await _database.instance;
-    await db.delete('comics', where: 'id = ?', whereArgs: <Object?>[id]);
+    await db.update(
+      'comics',
+      <String, Object?>{
+        'deleted_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: <Object?>[id],
+    );
+  }
+
+  Future<void> restoreComic(String id) async {
+    final db = await _database.instance;
+    await db.update(
+      'comics',
+      <String, Object?>{'deleted_at': null},
+      where: 'id = ?',
+      whereArgs: <Object?>[id],
+    );
+  }
+
+  Future<void> permanentlyDeleteComic(String id) async {
+    final db = await _database.instance;
+    await db.delete(
+      'comics',
+      where: 'id = ? AND deleted_at IS NOT NULL',
+      whereArgs: <Object?>[id],
+    );
   }
 
   Future<List<ComicItemRecord>> loadItems(String comicId) async {

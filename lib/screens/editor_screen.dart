@@ -27,7 +27,7 @@ class _EditorScreenState extends State<EditorScreen> {
   List<String> _originalIds = <String>[];
   String? _originalCoverAssetId;
   String? _coverAssetId;
-  String? _selectedItemId;
+  final Set<String> _selectedItemIds = <String>{};
   bool _loading = true;
   bool _saving = false;
   bool _allowPop = false;
@@ -115,7 +115,7 @@ class _EditorScreenState extends State<EditorScreen> {
                     itemBuilder: (context, index) => _buildDraggableItem(index),
                   ),
         bottomNavigationBar: _EditorToolbar(
-          hasSelection: _selectedItemId != null,
+          hasSelection: _selectedItemIds.isNotEmpty,
           canAdd: _items.length < 1000,
           onAscending: _sortAscending,
           onDescending: _reverse,
@@ -129,7 +129,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   Widget _buildDraggableItem(int index) {
     final item = _items[index];
-    final selected = item.id == _selectedItemId;
+    final selected = _selectedItemIds.contains(item.id);
     final isCover = item.asset.id == _coverAssetId ||
         (_coverAssetId == null && index == 0);
     return DragTarget<int>(
@@ -169,7 +169,11 @@ class _EditorScreenState extends State<EditorScreen> {
         ),
         child: GestureDetector(
           onTap: () => setState(() {
-            _selectedItemId = selected ? null : item.id;
+            if (selected) {
+              _selectedItemIds.remove(item.id);
+            } else {
+              _selectedItemIds.add(item.id);
+            }
           }),
           child: AnimatedScale(
             scale: candidates.isEmpty ? 1 : 0.94,
@@ -214,20 +218,28 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   void _deleteSelected() {
-    final id = _selectedItemId;
-    if (id == null) return;
+    if (_selectedItemIds.isEmpty) return;
     setState(() {
-      final selected = _items.firstWhere((item) => item.id == id);
-      _items.removeWhere((item) => item.id == id);
-      _removedIds.add(id);
-      if (selected.asset.id == _coverAssetId) _coverAssetId = null;
-      _selectedItemId = null;
+      final removed = _items
+          .where((item) => _selectedItemIds.contains(item.id))
+          .toList(growable: false);
+      _items.removeWhere((item) => _selectedItemIds.contains(item.id));
+      _removedIds.addAll(_selectedItemIds);
+      if (removed.any((item) => item.asset.id == _coverAssetId)) {
+        _coverAssetId = null;
+      }
+      _selectedItemIds.clear();
     });
   }
 
   void _setSelectedAsCover() {
-    final id = _selectedItemId;
-    if (id == null) return;
+    if (_selectedItemIds.length != 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('设置封面时请选择一张图片')),
+      );
+      return;
+    }
+    final id = _selectedItemIds.single;
     final item = _items.firstWhere((item) => item.id == id);
     setState(() => _coverAssetId = item.asset.id);
     ScaffoldMessenger.of(context).showSnackBar(

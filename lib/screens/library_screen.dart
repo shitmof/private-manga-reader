@@ -211,6 +211,7 @@ class _LibraryGrid extends StatelessWidget {
                   controller: controller,
                   summary: summary,
                   onTap: null,
+                  onDelete: null,
                 ),
               ),
             ),
@@ -220,6 +221,7 @@ class _LibraryGrid extends StatelessWidget {
                 controller: controller,
                 summary: summary,
                 onTap: null,
+                onDelete: null,
               ),
             ),
             child: AnimatedScale(
@@ -236,12 +238,39 @@ class _LibraryGrid extends StatelessWidget {
                     ),
                   ),
                 ),
+                onDelete: () => _moveToTrash(context, summary),
               ),
             ),
           ),
         );
       },
     );
+  }
+
+  Future<void> _moveToTrash(
+    BuildContext context,
+    ComicSummary summary,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('移到回收站？'),
+        content: Text('“${summary.comic.title}”可以稍后在设置的回收站中恢复，原图不会立即删除。'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('移到回收站'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await controller.deleteComic(summary.comic.id);
+    }
   }
 }
 
@@ -250,11 +279,13 @@ class _ComicCard extends StatelessWidget {
     required this.controller,
     required this.summary,
     required this.onTap,
+    required this.onDelete,
   });
 
   final AppController controller;
   final ComicSummary summary;
   final VoidCallback? onTap;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -265,10 +296,13 @@ class _ComicCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Expanded(
-            child: Hero(
-              tag: 'cover-${summary.comic.id}',
-              child: summary.coverStoredPath == null
-                  ? Container(
+            child: Stack(
+              fit: StackFit.expand,
+              children: <Widget>[
+                Hero(
+                  tag: 'cover-${summary.comic.id}',
+                  child: summary.coverStoredPath == null
+                      ? Container(
                       decoration: BoxDecoration(
                         color: ShelfColors.blueSoft,
                         borderRadius: BorderRadius.circular(18),
@@ -279,12 +313,29 @@ class _ComicCard extends StatelessWidget {
                             color: ShelfColors.blue, size: 34),
                       ),
                     )
-                  : PrivateImage(
+                      : PrivateImage(
                       controller: controller,
                       originalPath: summary.coverStoredPath!,
                       thumbnailPath: summary.coverThumbnailPath,
                       cacheWidth: 420,
+                        ),
+                ),
+                if (onDelete != null)
+                  Positioned(
+                    right: 6,
+                    top: 6,
+                    child: Material(
+                      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
+                      shape: const CircleBorder(),
+                      child: IconButton(
+                        visualDensity: VisualDensity.compact,
+                        tooltip: '移到回收站',
+                        onPressed: onDelete,
+                        icon: const Icon(Icons.more_horiz_rounded, size: 19),
+                      ),
                     ),
+                  ),
+              ],
             ),
           ),
           const SizedBox(height: 10),

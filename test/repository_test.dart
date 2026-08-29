@@ -87,6 +87,111 @@ void main() {
     expect(await repository.loadItems(second.id), hasLength(1));
   });
 
+  test('v1 数据库升级后旧漫画保持不变并支持回收站恢复', () async {
+    final path = p.join(sandbox.path, 'legacy-v1.db');
+    final legacy = await databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 1,
+        onCreate: (db, version) async {
+          await db.execute('''
+            CREATE TABLE assets (
+              id TEXT PRIMARY KEY,
+              content_hash TEXT NOT NULL UNIQUE,
+              original_file_name TEXT NOT NULL,
+              mime_type TEXT NOT NULL,
+              extension TEXT NOT NULL,
+              byte_size INTEGER NOT NULL,
+              width INTEGER NOT NULL DEFAULT 0,
+              height INTEGER NOT NULL DEFAULT 0,
+              stored_path TEXT NOT NULL,
+              thumbnail_path TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE comics (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              cover_asset_id TEXT,
+              sort_index INTEGER NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              last_read_position INTEGER NOT NULL DEFAULT 0,
+              last_read_offset REAL NOT NULL DEFAULT 0
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE comic_items (
+              id TEXT PRIMARY KEY,
+              comic_id TEXT NOT NULL,
+              asset_id TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              created_at TEXT NOT NULL
+            )
+          ''');
+          await db.execute(
+            'CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+          );
+        },
+      ),
+    );
+    const created = '2026-08-29T00:00:00.000Z';
+    await legacy.insert('assets', <String, Object?>{
+      'id': 'legacy-asset',
+      'content_hash': 'legacy-hash',
+      'original_file_name': '001.png',
+      'mime_type': 'image/png',
+      'extension': 'png',
+      'byte_size': 321,
+      'width': 10,
+      'height': 20,
+      'stored_path': 'assets/legacy-hash.png',
+      'thumbnail_path': 'thumbnails/legacy-hash.jpg',
+      'created_at': created,
+    });
+    await legacy.insert('comics', <String, Object?>{
+      'id': 'legacy-comic',
+      'title': '升级前漫画',
+      'cover_asset_id': 'legacy-asset',
+      'sort_index': 0,
+      'created_at': created,
+      'updated_at': created,
+      'last_read_position': 7,
+      'last_read_offset': 12.5,
+    });
+    await legacy.insert('comic_items', <String, Object?>{
+      'id': 'legacy-item',
+      'comic_id': 'legacy-comic',
+      'asset_id': 'legacy-asset',
+      'position': 0,
+      'created_at': created,
+    });
+    await legacy.close();
+
+    final migratedDatabase = AppDatabase(
+      factory: databaseFactoryFfi,
+      overridePath: path,
+    );
+    final migrated = LibraryRepository(migratedDatabase);
+    addTearDown(migratedDatabase.close);
+
+    final beforeDelete = await migrated.loadLibrary();
+    expect(beforeDelete, hasLength(1));
+    expect(beforeDelete.single.comic.title, '升级前漫画');
+    expect(beforeDelete.single.comic.lastReadPosition, 7);
+    expect(beforeDelete.single.itemCount, 1);
+    expect(beforeDelete.single.totalBytes, 321);
+
+    await migrated.deleteComic('legacy-comic');
+    expect(await migrated.loadLibrary(), isEmpty);
+    expect(await migrated.loadDeletedComics(), hasLength(1));
+
+    await migrated.restoreComic('legacy-comic');
+    expect(await migrated.loadLibrary(), hasLength(1));
+    expect(await migrated.loadDeletedComics(), isEmpty);
+  });
+
   test('1000 张可重排且第 1001 张被产品上限拦截', () async {
     final comic = await repository.createComic('千图测试');
     final asset = AssetRecord(

@@ -10,6 +10,7 @@ class Comic {
     required this.lastReadPosition,
     required this.lastReadOffset,
     this.coverAssetId,
+    this.deletedAt,
   });
 
   final String id;
@@ -20,6 +21,7 @@ class Comic {
   final DateTime updatedAt;
   final int lastReadPosition;
   final double lastReadOffset;
+  final DateTime? deletedAt;
 
   factory Comic.fromMap(Map<String, Object?> map) => Comic(
         id: map['id']! as String,
@@ -30,6 +32,9 @@ class Comic {
         updatedAt: DateTime.parse(map['updated_at']! as String),
         lastReadPosition: map['last_read_position']! as int,
         lastReadOffset: (map['last_read_offset']! as num).toDouble(),
+        deletedAt: map['deleted_at'] == null
+            ? null
+            : DateTime.parse(map['deleted_at']! as String),
       );
 }
 

@@ -77,6 +77,19 @@ class AppController extends ChangeNotifier {
     await refresh();
   }
 
+  Future<List<ComicSummary>> loadDeletedComics() =>
+      _repository.loadDeletedComics();
+
+  Future<void> restoreComic(String comicId) async {
+    await _repository.restoreComic(comicId);
+    await refresh();
+  }
+
+  Future<void> permanentlyDeleteComic(String comicId) async {
+    await _repository.permanentlyDeleteComic(comicId);
+    await deleteOrphanedAssets();
+  }
+
   Future<List<ComicItemRecord>> loadItems(String comicId) =>
       _repository.loadItems(comicId);
 
