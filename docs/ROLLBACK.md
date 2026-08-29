@@ -33,6 +33,7 @@ git tag --list
 - `checkpoint-archive-import-20260829`：漫画压缩包顺序导入完成点。
 - `checkpoint-network-mount-20260829`：网络挂载、只读缓存与设备验证完成点。
 - `v1.1.0`：压缩包、回收站、网络书库和升级兼容的完整发布版。
+- `backup-pre-editor-fix-20260830`：编辑页“选中删除保存”回归修复前的 v1.1.0 稳定点。
 
 ## 安全回退：往下取版本
 

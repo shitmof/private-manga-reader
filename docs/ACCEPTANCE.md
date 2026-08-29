@@ -69,3 +69,31 @@
 - Android 已完成构建与实机验证。
 - iOS 工程和相册权限说明已生成，但当前 Windows 主机无法执行 Xcode 构建与真机验收。
 - HEIC/HEIF 原图会保持原始字节；若纯 Dart 缩略图解码器不支持某个厂商变体，原图仍可导入，卡片会回退到系统运行时解码。
+
+## 编辑页回归修复与网络挂载复验（2026-08-30）
+
+### 回归修复：编辑图片顺序“选中→删除→保存”
+
+- 根因：`LibraryRepository.loadItems()` 返回固定长度列表，编辑页直接持有后，删除（`removeWhere`）与拖动（`removeAt`/`insert`）会抛 `Cannot remove from a fixed-length list`，表现为手机上“选中后无法删除/保存”。
+- 修复：进入编辑页时复制为可变草稿列表（`List<ComicItemRecord>.of(items)`）；删除/拖动只改内存草稿，只有点“保存”才经 `applyItemEdits` 落库，取消不改变原图。
+- 界面仅补既有编辑能力的可达性与反馈，不改变 UI 风格：整卡可点（`HitTestBehavior.opaque` + 语义按钮）、标题栏显示“已选择 N 张”、删除前弹确认。
+- 自动化：`flutter analyze` 零问题；`flutter test` 18 项全部通过（原 13 项 + 编辑页 5 项回归：单选删除保存、批量选择删除保存、取消不变原图、保存后重进持久、长按拖动排序不崩溃且生效）。
+- Android 模拟器实机回路（Debug APK，Android 15，1080×2400）：
+  - 通过系统文件选择器逐张导入 3 张测试图（红/绿/蓝）→ 编辑页显示 3 个瓦片。
+  - 点击第 2 张（绿）→ 出现蓝色选中边框与“已选择 1 张”→ 删除 → 红色确认按钮 → 确认 → 剩 2 张。
+  - 保存 → 返回详情页；数据库剩 `test-1.png`、`test-3.png`；重新进入编辑页仍显示 2 张。
+  - 批量选择 2 张 → “已选择 2 张”→ 删除确认 → 0/1000；点“取消”退出后数据库仍 2 张（草稿不落库）。
+  - 长按拖动第 2 张到第 1 位 → 不崩溃 → 保存后数据库顺序变为 `[test-3, test-1]`。
+
+### 网络挂载复验（本地真实 HTTP OPDS 服务）
+
+- 本机 Python 起 OPDS 服务（`http://127.0.0.1:18080/opds.xml`），模拟器经 `10.0.2.2` 访问。
+- 添加 OPDS 书库 → 验证连接 → 扫描发现 1 本远程漫画（3 页 CBZ）并入库。
+- 打开远程漫画：下载 CBZ → 解压 → 3 页索引入库、`network-cache/` 缓存文件落盘；真实页面正常显示（红页滚动至蓝页）。
+- 阅读进度只写本机：退出后 `last_read_position=1`。
+- 解除挂载：`network_sources`/`remote_books`/`remote_pages` 清零，`network-cache/` 清空；服务器端 CBZ 保持原样（6413 字节不变，只读）。
+
+### 发现与边界（未改动，待你决定）
+
+- 系统文件选择器当前为单选：`ImportService.pickFromFiles()/pickFromGallery()` 未设置 `allowMultiple: true`，与 README“批量导入”描述不一致；本次验证以逐张导入完成，未改该行为（不在批准范围内）。若需要批量导入，建议后续补 `allowMultiple: true` 并加对应测试。
+- 本次未 bump 版本号、未构建/发布新 APK；源码与文档已推送私有 GitHub（`main`），回退点标签 `backup-pre-editor-fix-20260830` 已推送。
