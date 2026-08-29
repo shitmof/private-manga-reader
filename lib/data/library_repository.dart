@@ -15,8 +15,7 @@ class LibraryRepository {
 
   Future<List<ComicSummary>> loadLibrary() => _loadLibrary(deleted: false);
 
-  Future<List<ComicSummary>> loadDeletedComics() =>
-      _loadLibrary(deleted: true);
+  Future<List<ComicSummary>> loadDeletedComics() => _loadLibrary(deleted: true);
 
   Future<List<ComicSummary>> _loadLibrary({required bool deleted}) async {
     final db = await _database.instance;
@@ -38,13 +37,15 @@ class LibraryRepository {
       ORDER BY ${deleted ? 'c.deleted_at DESC' : 'c.sort_index, c.created_at'}
     ''');
     return rows
-        .map((row) => ComicSummary(
-              comic: Comic.fromMap(row),
-              itemCount: row['item_count']! as int,
-              totalBytes: row['total_bytes']! as int,
-              coverStoredPath: row['cover_stored_path'] as String?,
-              coverThumbnailPath: row['cover_thumbnail_path'] as String?,
-            ))
+        .map(
+          (row) => ComicSummary(
+            comic: Comic.fromMap(row),
+            itemCount: row['item_count']! as int,
+            totalBytes: row['total_bytes']! as int,
+            coverStoredPath: row['cover_stored_path'] as String?,
+            coverThumbnailPath: row['cover_thumbnail_path'] as String?,
+          ),
+        )
         .toList(growable: false);
   }
 
@@ -102,9 +103,7 @@ class LibraryRepository {
     final db = await _database.instance;
     await db.update(
       'comics',
-      <String, Object?>{
-        'deleted_at': DateTime.now().toUtc().toIso8601String(),
-      },
+      <String, Object?>{'deleted_at': DateTime.now().toUtc().toIso8601String()},
       where: 'id = ?',
       whereArgs: <Object?>[id],
     );
@@ -131,22 +130,27 @@ class LibraryRepository {
 
   Future<List<ComicItemRecord>> loadItems(String comicId) async {
     final db = await _database.instance;
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT ci.id AS item_id, ci.comic_id, ci.position,
         ci.created_at AS item_created_at, a.*
       FROM comic_items ci
       JOIN assets a ON a.id = ci.asset_id
       WHERE ci.comic_id = ?
       ORDER BY ci.position, ci.created_at
-    ''', <Object?>[comicId]);
+    ''',
+      <Object?>[comicId],
+    );
     return rows
-        .map((row) => ComicItemRecord(
-              id: row['item_id']! as String,
-              comicId: row['comic_id']! as String,
-              position: row['position']! as int,
-              createdAt: DateTime.parse(row['item_created_at']! as String),
-              asset: AssetRecord.fromMap(row),
-            ))
+        .map(
+          (row) => ComicItemRecord(
+            id: row['item_id']! as String,
+            comicId: row['comic_id']! as String,
+            position: row['position']! as int,
+            createdAt: DateTime.parse(row['item_created_at']! as String),
+            asset: AssetRecord.fromMap(row),
+          ),
+        )
         .toList(growable: false);
   }
 
@@ -348,11 +352,7 @@ class LibraryRepository {
     });
   }
 
-  Future<void> saveProgress(
-    String comicId,
-    int position,
-    double offset,
-  ) async {
+  Future<void> saveProgress(String comicId, int position, double offset) async {
     final db = await _database.instance;
     await db.update(
       'comics',
@@ -393,11 +393,10 @@ class LibraryRepository {
     };
     await db.transaction((txn) async {
       for (final entry in values.entries) {
-        await txn.insert(
-          'settings',
-          <String, Object?>{'key': entry.key, 'value': entry.value},
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+        await txn.insert('settings', <String, Object?>{
+          'key': entry.key,
+          'value': entry.value,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
     });
   }
@@ -460,7 +459,10 @@ class LibraryRepository {
       'createdAt': DateTime.now().toUtc().toIso8601String(),
       'comics': await db.query('comics', orderBy: 'sort_index'),
       'assets': await db.query('assets'),
-      'comicItems': await db.query('comic_items', orderBy: 'comic_id, position'),
+      'comicItems': await db.query(
+        'comic_items',
+        orderBy: 'comic_id, position',
+      ),
       'settings': await db.query('settings'),
     };
   }
@@ -497,10 +499,12 @@ class LibraryRepository {
 
   List<Map<String, Object?>> _rows(Object? value) {
     if (value is! List) throw const FormatException('备份清单缺少数据表');
-    return value.map((row) {
-      if (row is! Map) throw const FormatException('备份数据表结构错误');
-      return row.map((key, value) => MapEntry(key.toString(), value));
-    }).toList(growable: false);
+    return value
+        .map((row) {
+          if (row is! Map) throw const FormatException('备份数据表结构错误');
+          return row.map((key, value) => MapEntry(key.toString(), value));
+        })
+        .toList(growable: false);
   }
 
   String encodeManifest(Map<String, Object?> manifest) =>

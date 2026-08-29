@@ -45,8 +45,10 @@ class _EditorScreenState extends State<EditorScreen> {
       _items = items;
       if (initial) {
         _originalIds = items.map((item) => item.id).toList(growable: false);
-        _originalCoverAssetId =
-            widget.controller.summaryFor(widget.comicId)?.comic.coverAssetId;
+        _originalCoverAssetId = widget.controller
+            .summaryFor(widget.comicId)
+            ?.comic
+            .coverAssetId;
         _coverAssetId = _originalCoverAssetId;
       }
       _loading = false;
@@ -55,7 +57,8 @@ class _EditorScreenState extends State<EditorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.controller.summaryFor(widget.comicId)?.comic.title ?? '编辑';
+    final title =
+        widget.controller.summaryFor(widget.comicId)?.comic.title ?? '编辑';
     return PopScope(
       canPop: _allowPop,
       onPopInvokedWithResult: (didPop, result) {
@@ -64,7 +67,10 @@ class _EditorScreenState extends State<EditorScreen> {
       child: Scaffold(
         appBar: AppBar(
           leadingWidth: 72,
-          leading: TextButton(onPressed: _saving ? null : _cancel, child: const Text('取消')),
+          leading: TextButton(
+            onPressed: _saving ? null : _cancel,
+            child: const Text('取消'),
+          ),
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
@@ -96,24 +102,24 @@ class _EditorScreenState extends State<EditorScreen> {
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : _items.isEmpty
-                ? Center(
-                    child: FilledButton.icon(
-                      onPressed: _addImages,
-                      icon: const Icon(Icons.add_photo_alternate_outlined),
-                      label: const Text('添加图片'),
-                    ),
-                  )
-                : GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 108),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                      childAspectRatio: 0.72,
-                    ),
-                    itemCount: _items.length,
-                    itemBuilder: (context, index) => _buildDraggableItem(index),
-                  ),
+            ? Center(
+                child: FilledButton.icon(
+                  onPressed: _addImages,
+                  icon: const Icon(Icons.add_photo_alternate_outlined),
+                  label: const Text('添加图片'),
+                ),
+              )
+            : GridView.builder(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 108),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                  childAspectRatio: 0.72,
+                ),
+                itemCount: _items.length,
+                itemBuilder: (context, index) => _buildDraggableItem(index),
+              ),
         bottomNavigationBar: _EditorToolbar(
           hasSelection: _selectedItemIds.isNotEmpty,
           canAdd: _items.length < 1000,
@@ -130,8 +136,8 @@ class _EditorScreenState extends State<EditorScreen> {
   Widget _buildDraggableItem(int index) {
     final item = _items[index];
     final selected = _selectedItemIds.contains(item.id);
-    final isCover = item.asset.id == _coverAssetId ||
-        (_coverAssetId == null && index == 0);
+    final isCover =
+        item.asset.id == _coverAssetId || (_coverAssetId == null && index == 0);
     return DragTarget<int>(
       onWillAcceptWithDetails: (details) => details.data != index,
       onAcceptWithDetails: (details) {
@@ -234,17 +240,17 @@ class _EditorScreenState extends State<EditorScreen> {
 
   void _setSelectedAsCover() {
     if (_selectedItemIds.length != 1) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('设置封面时请选择一张图片')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('设置封面时请选择一张图片')));
       return;
     }
     final id = _selectedItemIds.single;
     final item = _items.firstWhere((item) => item.id == id);
     setState(() => _coverAssetId = item.asset.id);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已选择新封面，保存后生效')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('已选择新封面，保存后生效')));
   }
 
   Future<void> _save() async {
@@ -343,7 +349,11 @@ class _ImageTile extends StatelessWidget {
               child: CircleAvatar(
                 radius: 12,
                 backgroundColor: ShelfColors.blue,
-                child: Icon(Icons.bookmark_rounded, size: 14, color: Colors.white),
+                child: Icon(
+                  Icons.bookmark_rounded,
+                  size: 14,
+                  color: Colors.white,
+                ),
               ),
             ),
           if (selected)
@@ -392,11 +402,31 @@ class _EditorToolbar extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: <Widget>[
-              _Tool(icon: Icons.arrow_upward_rounded, label: '正序', onTap: onAscending),
-              _Tool(icon: Icons.swap_vert_rounded, label: '倒序', onTap: onDescending),
-              _Tool(icon: Icons.add_rounded, label: '添加', onTap: canAdd ? onAdd : null),
-              _Tool(icon: Icons.delete_outline_rounded, label: '删除', onTap: hasSelection ? onDelete : null),
-              _Tool(icon: Icons.bookmark_outline_rounded, label: '封面', onTap: hasSelection ? onCover : null),
+              _Tool(
+                icon: Icons.arrow_upward_rounded,
+                label: '正序',
+                onTap: onAscending,
+              ),
+              _Tool(
+                icon: Icons.swap_vert_rounded,
+                label: '倒序',
+                onTap: onDescending,
+              ),
+              _Tool(
+                icon: Icons.add_rounded,
+                label: '添加',
+                onTap: canAdd ? onAdd : null,
+              ),
+              _Tool(
+                icon: Icons.delete_outline_rounded,
+                label: '删除',
+                onTap: hasSelection ? onDelete : null,
+              ),
+              _Tool(
+                icon: Icons.bookmark_outline_rounded,
+                label: '封面',
+                onTap: hasSelection ? onCover : null,
+              ),
             ],
           ),
         ),

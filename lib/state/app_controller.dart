@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../data/library_repository.dart';
 import '../models/entities.dart';
 import '../services/backup_service.dart';
+import '../services/archive_import_service.dart';
 import '../services/import_service.dart';
 import '../services/storage_service.dart';
 
@@ -30,11 +31,13 @@ class AppController extends ChangeNotifier {
     this._repository,
     this.storage,
     this._importer,
+    this._archiveImporter,
     this._backup,
   );
 
   final LibraryRepository _repository;
   final ImportService _importer;
+  final ArchiveImportService _archiveImporter;
   final BackupService _backup;
   final StorageService storage;
 
@@ -94,12 +97,67 @@ class AppController extends ChangeNotifier {
       _repository.loadItems(comicId);
 
   Future<List<PlatformFile>> pickImages({required bool fromGallery}) =>
-      fromGallery
-          ? _importer.pickFromGallery()
-          : _importer.pickFromFiles();
+      fromGallery ? _importer.pickFromGallery() : _importer.pickFromFiles();
 
   Future<int> estimateBytes(List<PlatformFile> files) =>
       _importer.estimateBytes(files);
+
+  Future<List<PlatformFile>> pickArchives() => _archiveImporter.pickArchives();
+
+  Future<PreparedArchiveSelection> prepareArchives(
+    List<PlatformFile> files,
+  ) async {
+    operation = OperationProgress(
+      title: '正在检查漫画压缩包',
+      completed: 0,
+      total: files.length,
+      detail: '识别格式与页面顺序',
+    );
+    notifyListeners();
+    try {
+      return await _archiveImporter.prepareArchives(files);
+    } finally {
+      operation = null;
+      notifyListeners();
+    }
+  }
+
+  Future<ImportReport> importArchives({
+    required String comicId,
+    required PreparedArchiveSelection selection,
+    required DuplicatePolicy duplicatePolicy,
+    bool setCoverFromFirstArchive = false,
+  }) async {
+    operation = OperationProgress(
+      title: '正在解压并导入',
+      completed: 0,
+      total: selection.totalPages,
+      detail: '准备中',
+    );
+    notifyListeners();
+    try {
+      final report = await _archiveImporter.importPrepared(
+        comicId: comicId,
+        selection: selection,
+        duplicatePolicy: duplicatePolicy,
+        setCoverFromFirstArchive: setCoverFromFirstArchive,
+        onProgress: (completed, total, name) {
+          operation = OperationProgress(
+            title: '正在解压并导入',
+            completed: completed,
+            total: total,
+            detail: name,
+          );
+          notifyListeners();
+        },
+      );
+      await refresh();
+      return report;
+    } finally {
+      operation = null;
+      notifyListeners();
+    }
+  }
 
   Future<int?> freeBytes() => storage.freeBytes();
 
@@ -161,11 +219,7 @@ class AppController extends ChangeNotifier {
     await refresh();
   }
 
-  Future<void> saveProgress(
-    String comicId,
-    int position,
-    double offset,
-  ) async {
+  Future<void> saveProgress(String comicId, int position, double offset) async {
     if (!preferences.rememberProgress) return;
     await _repository.saveProgress(comicId, position, offset);
   }
@@ -176,9 +230,8 @@ class AppController extends ChangeNotifier {
     await _repository.savePreferences(value);
   }
 
-  Future<LibraryStats> loadStats() async => _repository.loadStats(
-        thumbnailBytes: await storage.thumbnailBytes(),
-      );
+  Future<LibraryStats> loadStats() async =>
+      _repository.loadStats(thumbnailBytes: await storage.thumbnailBytes());
 
   Future<void> clearThumbnails() async {
     operation = const OperationProgress(

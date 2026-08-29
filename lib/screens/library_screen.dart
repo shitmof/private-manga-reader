@@ -102,24 +102,21 @@ class LibraryScreen extends StatelessWidget {
       context: context,
       controller: controller,
       comicId: comic.id,
+      setCoverFromFirstArchive: true,
     );
     if (!context.mounted) return;
     if (report != null && report.imported > 0) {
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => EditorScreen(
-            controller: controller,
-            comicId: comic.id,
-          ),
+          builder: (_) =>
+              EditorScreen(controller: controller, comicId: comic.id),
         ),
       );
     } else {
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => ComicDetailScreen(
-            controller: controller,
-            comicId: comic.id,
-          ),
+          builder: (_) =>
+              ComicDetailScreen(controller: controller, comicId: comic.id),
         ),
       );
     }
@@ -153,8 +150,7 @@ class _EmptyLibrary extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 24),
-            Text('这里还没有漫画',
-                style: Theme.of(context).textTheme.headlineSmall),
+            Text('这里还没有漫画', style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 10),
             const Text(
               '从相册或文件导入原图。导入后即使源图被删除，书架中的副本仍可正常阅读。',
@@ -247,10 +243,7 @@ class _LibraryGrid extends StatelessWidget {
     );
   }
 
-  Future<void> _moveToTrash(
-    BuildContext context,
-    ComicSummary summary,
-  ) async {
+  Future<void> _moveToTrash(BuildContext context, ComicSummary summary) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -303,21 +296,24 @@ class _ComicCard extends StatelessWidget {
                   tag: 'cover-${summary.comic.id}',
                   child: summary.coverStoredPath == null
                       ? Container(
-                      decoration: BoxDecoration(
-                        color: ShelfColors.blueSoft,
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: ShelfColors.line),
-                      ),
-                      child: const Center(
-                        child: Icon(Icons.image_outlined,
-                            color: ShelfColors.blue, size: 34),
-                      ),
-                    )
+                          decoration: BoxDecoration(
+                            color: ShelfColors.blueSoft,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: ShelfColors.line),
+                          ),
+                          child: const Center(
+                            child: Icon(
+                              Icons.image_outlined,
+                              color: ShelfColors.blue,
+                              size: 34,
+                            ),
+                          ),
+                        )
                       : PrivateImage(
-                      controller: controller,
-                      originalPath: summary.coverStoredPath!,
-                      thumbnailPath: summary.coverThumbnailPath,
-                      cacheWidth: 420,
+                          controller: controller,
+                          originalPath: summary.coverStoredPath!,
+                          thumbnailPath: summary.coverThumbnailPath,
+                          cacheWidth: 420,
                         ),
                 ),
                 if (onDelete != null)
@@ -325,7 +321,9 @@ class _ComicCard extends StatelessWidget {
                     right: 6,
                     top: 6,
                     child: Material(
-                      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surface.withValues(alpha: 0.9),
                       shape: const CircleBorder(),
                       child: IconButton(
                         visualDensity: VisualDensity.compact,
@@ -348,9 +346,9 @@ class _ComicCard extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             '${summary.itemCount} 张 · ${formatBytes(summary.totalBytes)}',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: ShelfColors.muted,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: ShelfColors.muted),
           ),
         ],
       ),

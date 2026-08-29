@@ -18,7 +18,8 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late Future<LibraryStats> _stats = widget.controller.loadStats();
 
-  void _refreshStats() => setState(() => _stats = widget.controller.loadStats());
+  void _refreshStats() =>
+      setState(() => _stats = widget.controller.loadStats());
 
   @override
   Widget build(BuildContext context) {
@@ -94,8 +95,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 selected: <AppThemePreference>{preferences.theme},
                 onSelectionChanged: (selection) =>
                     widget.controller.updatePreferences(
-                  preferences.copyWith(theme: selection.first),
-                ),
+                      preferences.copyWith(theme: selection.first),
+                    ),
               ),
             ),
           ),
@@ -112,13 +113,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _StorageRow(
                       color: ShelfColors.blue,
                       title: '私有原图',
-                      value: stats == null ? '计算中' : formatBytes(stats.originalBytes),
+                      value: stats == null
+                          ? '计算中'
+                          : formatBytes(stats.originalBytes),
                     ),
                     const Divider(height: 1, indent: 54),
                     _StorageRow(
                       color: const Color(0xFF91A4B7),
                       title: '缩略图缓存',
-                      value: stats == null ? '计算中' : formatBytes(stats.thumbnailBytes),
+                      value: stats == null
+                          ? '计算中'
+                          : formatBytes(stats.thumbnailBytes),
                     ),
                     const Divider(height: 1, indent: 54),
                     _StorageRow(
@@ -134,16 +139,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       title: const Text('回收站'),
                       subtitle: const Text('恢复或永久删除漫画'),
                       trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => TrashScreen(
-                            controller: widget.controller,
-                          ),
-                        ),
-                      ).then((_) {
-                        _refreshStats();
-                        widget.controller.refresh();
-                      }),
+                      onTap: () => Navigator.of(context)
+                          .push(
+                            MaterialPageRoute<void>(
+                              builder: (_) =>
+                                  TrashScreen(controller: widget.controller),
+                            ),
+                          )
+                          .then((_) {
+                            _refreshStats();
+                            widget.controller.refresh();
+                          }),
                     ),
                     ListTile(
                       leading: const Icon(Icons.cleaning_services_outlined),
@@ -199,9 +205,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: ListTile(
               leading: Icon(Icons.lock_outline_rounded),
               title: Text('完全本地'),
-              subtitle: Text(
-                '没有账号、社交、广告或云同步。导入只复制到 App 私有目录，不写回系统相册。',
-              ),
+              subtitle: Text('没有账号、社交、广告或云同步。导入只复制到 App 私有目录，不写回系统相册。'),
             ),
           ),
           const SizedBox(height: 24),
@@ -220,9 +224,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await widget.controller.clearThumbnails();
     _refreshStats();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('缩略图缓存已清理，原图未删除')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('缩略图缓存已清理，原图未删除')));
     }
   }
 
@@ -238,7 +242,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: const Text('彻底删除待清理原图？'),
         content: const Text('这些文件已不被任何漫画引用。删除后只能通过此前创建的备份恢复。'),
         actions: <Widget>[
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
@@ -251,9 +258,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final count = await widget.controller.deleteOrphanedAssets();
     _refreshStats();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已彻底删除 $count 个无引用原图')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('已彻底删除 $count 个无引用原图')));
     }
   }
 
@@ -262,14 +269,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final file = await widget.controller.createAndShareBackup();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('备份已创建：${file.path.split(RegExp(r'[/\\]')).last}')),
+          SnackBar(
+            content: Text('备份已创建：${file.path.split(RegExp(r'[/\\]')).last}'),
+          ),
         );
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('备份失败：$error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('备份失败：$error')));
       }
     }
   }
@@ -281,12 +290,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('恢复这个备份？'),
-        content: Text(
-          '当前书架结构会被备份内容替换。恢复前会自动创建一份安全备份。\n\n${source.name}',
-        ),
+        content: Text('当前书架结构会被备份内容替换。恢复前会自动创建一份安全备份。\n\n${source.name}'),
         actions: <Widget>[
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('开始恢复')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('开始恢复'),
+          ),
         ],
       ),
     );
@@ -299,20 +312,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('恢复完成'),
-            content: Text(
-              '书架已恢复。恢复前安全备份保存在：\n${safety.path}',
-            ),
+            content: Text('书架已恢复。恢复前安全备份保存在：\n${safety.path}'),
             actions: <Widget>[
-              FilledButton(onPressed: () => Navigator.pop(context), child: const Text('知道了')),
+              FilledButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('知道了'),
+              ),
             ],
           ),
         );
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('恢复失败，当前书架未替换：$error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('恢复失败，当前书架未替换：$error')));
       }
     }
   }
@@ -329,16 +343,20 @@ class _SectionLabel extends StatelessWidget {
       child: Text(
         text,
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: ShelfColors.muted,
-              fontWeight: FontWeight.w700,
-            ),
+          color: ShelfColors.muted,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
 }
 
 class _StorageRow extends StatelessWidget {
-  const _StorageRow({required this.color, required this.title, required this.value});
+  const _StorageRow({
+    required this.color,
+    required this.title,
+    required this.value,
+  });
   final Color color;
   final String title;
   final String value;

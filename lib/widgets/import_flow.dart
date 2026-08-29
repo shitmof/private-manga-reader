@@ -2,15 +2,17 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../models/entities.dart';
+import '../services/archive_import_service.dart';
 import '../state/app_controller.dart';
 import 'formatters.dart';
 
-enum _ImportSource { gallery, files }
+enum _ImportSource { gallery, files, archives }
 
 Future<ImportReport?> runImportFlow({
   required BuildContext context,
   required AppController controller,
   required String comicId,
+  bool setCoverFromFirstArchive = false,
 }) async {
   final source = await showModalBottomSheet<_ImportSource>(
     context: context,
@@ -33,12 +35,26 @@ Future<ImportReport?> runImportFlow({
               subtitle: const Text('支持 JPG、PNG、WebP、GIF、HEIC 等'),
               onTap: () => Navigator.pop(context, _ImportSource.files),
             ),
+            ListTile(
+              leading: const Icon(Icons.folder_zip_outlined),
+              title: const Text('导入漫画压缩包'),
+              subtitle: const Text('CBZ、ZIP、CBR、RAR、CB7、7z、CBT、TAR'),
+              onTap: () => Navigator.pop(context, _ImportSource.archives),
+            ),
           ],
         ),
       ),
     ),
   );
   if (source == null || !context.mounted) return null;
+  if (source == _ImportSource.archives) {
+    return _runArchiveImportFlow(
+      context: context,
+      controller: controller,
+      comicId: comicId,
+      setCoverFromFirstArchive: setCoverFromFirstArchive,
+    );
+  }
   final files = await controller.pickImages(
     fromGallery: source == _ImportSource.gallery,
   );
@@ -54,10 +70,10 @@ Future<ImportReport?> runImportFlow({
       content: Text(
         insufficient
             ? '预计需要 ${formatBytes(estimatedBytes)}，当前可用 '
-                '${formatBytes(freeBytes)}。请先释放空间。'
+                  '${formatBytes(freeBytes)}。请先释放空间。'
             : '预计复制 ${formatBytes(estimatedBytes)} 到 App 私有目录。'
-                '${freeBytes == null ? '' : '\n设备可用 ${formatBytes(freeBytes)}。'}'
-                '\n\n如果当前漫画中出现内容完全相同的图片：',
+                  '${freeBytes == null ? '' : '\n设备可用 ${formatBytes(freeBytes)}。'}'
+                  '\n\n如果当前漫画中出现内容完全相同的图片：',
       ),
       actions: <Widget>[
         TextButton(
@@ -133,4 +149,153 @@ Future<ImportReport?> runImportFlow({
       for (final failure in report.failures) pending[failure.sourceIndex],
     ];
   }
+}
+
+Future<ImportReport?> _runArchiveImportFlow({
+  required BuildContext context,
+  required AppController controller,
+  required String comicId,
+  required bool setCoverFromFirstArchive,
+}) async {
+  final files = await controller.pickArchives();
+  if (files.isEmpty || !context.mounted) return null;
+
+  PreparedArchiveSelection? selection;
+  try {
+    selection = await controller.prepareArchives(files);
+    if (!context.mounted) return null;
+    final preparedSelection = selection;
+    final freeBytes = await controller.freeBytes();
+    if (!context.mounted) return null;
+    final insufficient =
+        freeBytes != null && preparedSelection.decodedBytes > freeBytes;
+    final queue = preparedSelection.archives
+        .take(5)
+        .map(
+          (item) =>
+              '${item.displayName} · ${item.pages.length} 张 · ${item.format.toUpperCase()}',
+        )
+        .join('\n');
+    final extra = preparedSelection.archives.length > 5
+        ? '\n还有 ${preparedSelection.archives.length - 5} 个压缩包'
+        : '';
+    final policy = await showDialog<DuplicatePolicy>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          insufficient
+              ? '设备空间不足'
+              : '确认导入 ${preparedSelection.archives.length} 个压缩包',
+        ),
+        content: Text(
+          insufficient
+              ? '解压后约需 ${formatBytes(preparedSelection.decodedBytes)}，当前可用 '
+                    '${formatBytes(freeBytes)}。请先释放空间。'
+              : '将按下列队列顺序连续追加：\n\n$queue$extra'
+                    '\n\n共 ${preparedSelection.totalPages} 张，解压后约 '
+                    '${formatBytes(preparedSelection.decodedBytes)}。'
+                    '\n文件名使用数字自然排序，ComicInfo.xml 顺序优先。'
+                    '\n\n当前漫画中出现内容完全相同的图片：',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          if (!insufficient) ...<Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(context, DuplicatePolicy.keep),
+              child: const Text('仍然导入'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, DuplicatePolicy.skip),
+              child: const Text('跳过重复'),
+            ),
+          ],
+        ],
+      ),
+    );
+    if (policy == null || !context.mounted) return null;
+
+    var pending = preparedSelection;
+    var imported = 0;
+    var skipped = 0;
+    while (true) {
+      final report = await controller.importArchives(
+        comicId: comicId,
+        selection: pending,
+        duplicatePolicy: policy,
+        setCoverFromFirstArchive:
+            setCoverFromFirstArchive && pending.archives.first.sourceIndex == 0,
+      );
+      imported += report.imported;
+      skipped += report.skippedDuplicates;
+      final aggregate = ImportReport(
+        imported: imported,
+        skippedDuplicates: skipped,
+        failures: report.failures,
+      );
+      if (!context.mounted) return aggregate;
+      final retry = await _showArchiveResult(context, aggregate);
+      if (retry != true || report.failures.isEmpty) return aggregate;
+      final failedSourceIndex = report.failures.first.sourceIndex;
+      pending = PreparedArchiveSelection(
+        preparedSelection.archives
+            .where((item) => item.sourceIndex >= failedSourceIndex)
+            .toList(growable: false),
+      );
+    }
+  } catch (error) {
+    if (context.mounted) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('无法导入压缩包'),
+          content: Text(error.toString().replaceFirst('FormatException: ', '')),
+          actions: <Widget>[
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('知道了'),
+            ),
+          ],
+        ),
+      );
+    }
+    return null;
+  } finally {
+    await selection?.dispose();
+  }
+}
+
+Future<bool?> _showArchiveResult(BuildContext context, ImportReport report) {
+  final failure = report.failures.firstOrNull;
+  return showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(failure == null ? '压缩包导入完成' : '已暂停后续压缩包'),
+      content: Text(
+        '成功 ${report.imported} 张'
+        '${report.skippedDuplicates == 0 ? '' : '\n跳过重复 ${report.skippedDuplicates} 张'}'
+        '${failure == null ? '' : '\n\n${failure.fileName}：${failure.reason}\n失败压缩包已自动回滚，不会打乱后续顺序。'}',
+      ),
+      actions: <Widget>[
+        if (failure != null)
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('稍后处理'),
+          ),
+        if (failure != null)
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('重试该包'),
+          )
+        else
+          FilledButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('知道了'),
+          ),
+      ],
+    ),
+  );
 }

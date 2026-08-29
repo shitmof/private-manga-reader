@@ -6,7 +6,7 @@ import 'package:sqflite/sqflite.dart';
 
 class AppDatabase {
   AppDatabase({DatabaseFactory? factory, this.overridePath})
-      : _factory = factory ?? databaseFactory;
+    : _factory = factory ?? databaseFactory;
 
   final DatabaseFactory _factory;
   final String? overridePath;
@@ -15,7 +15,8 @@ class AppDatabase {
   Future<Database> get instance async {
     final existing = _database;
     if (existing != null && existing.isOpen) return existing;
-    final path = overridePath ??
+    final path =
+        overridePath ??
         p.join((await getApplicationSupportDirectory()).path, 'library.db');
     await _ensureMigrationSnapshot(path);
     _database = await _factory.openDatabase(
@@ -79,9 +80,7 @@ class AppDatabase {
     await db.execute(
       'CREATE INDEX idx_items_comic_position ON comic_items(comic_id, position)',
     );
-    await db.execute(
-      'CREATE INDEX idx_items_asset ON comic_items(asset_id)',
-    );
+    await db.execute('CREATE INDEX idx_items_asset ON comic_items(asset_id)');
     await db.execute('''
       CREATE TABLE settings (
         key TEXT PRIMARY KEY,

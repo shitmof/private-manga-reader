@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:archive/archive.dart' as legacy_archive;
 import 'package:cross_file/cross_file.dart';
 import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
@@ -11,6 +12,7 @@ import 'package:private_manga_reader/data/app_database.dart';
 import 'package:private_manga_reader/data/library_repository.dart';
 import 'package:private_manga_reader/models/entities.dart';
 import 'package:private_manga_reader/services/backup_service.dart';
+import 'package:private_manga_reader/services/archive_import_service.dart';
 import 'package:private_manga_reader/services/import_service.dart';
 import 'package:private_manga_reader/services/storage_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -31,7 +33,9 @@ void main() {
       overridePath: p.join(sandbox.path, 'library.db'),
     );
     repository = LibraryRepository(database);
-    storage = StorageService(rootOverride: Directory(p.join(sandbox.path, 'files')));
+    storage = StorageService(
+      rootOverride: Directory(p.join(sandbox.path, 'files')),
+    );
     await storage.initialize();
     importer = ImportService(repository, storage);
   });
@@ -250,12 +254,67 @@ void main() {
     expect(restored?.comic.lastReadOffset, 12.5);
     final restoredItems = await repository.loadItems(comic.id);
     expect(restoredItems, hasLength(1));
-    final restoredFile = File(storage.resolve(restoredItems.single.asset.storedPath));
+    final restoredFile = File(
+      storage.resolve(restoredItems.single.asset.storedPath),
+    );
     expect(await restoredFile.exists(), isTrue);
     expect(
       (await sha256.bind(restoredFile.openRead()).first).toString(),
       item.asset.contentHash,
     );
+  });
+
+  test('多个漫画压缩包按选择队列与文件名自然顺序连续追加', () async {
+    final comic = await repository.createComic('压缩包队列');
+    final existing = await _createPng(sandbox, 'existing.png');
+    await importer.importFiles(
+      comicId: comic.id,
+      files: <PlatformFile>[_TestPlatformFile(existing)],
+      duplicatePolicy: DuplicatePolicy.keep,
+    );
+
+    final first =
+        await _createZip(sandbox, 'chapter-a.cbz', <String, List<int>>{
+          'chapter/10.png': _pngBytes(10),
+          'chapter/2.png': _pngBytes(2),
+          'chapter/1.png': _pngBytes(1),
+        });
+    final second = await _createZip(
+      sandbox,
+      'chapter-b.zip',
+      <String, List<int>>{'004.png': _pngBytes(4), '003.png': _pngBytes(3)},
+    );
+    final archiveImporter = ArchiveImportService(repository, storage, importer);
+    final selection = await archiveImporter.prepareArchives(<PlatformFile>[
+      _TestPlatformFile(first),
+      _TestPlatformFile(second),
+    ]);
+    addTearDown(selection.dispose);
+
+    expect(selection.archives.map((item) => item.format), <String>[
+      'zip',
+      'zip',
+    ]);
+    expect(selection.totalPages, 5);
+    final report = await archiveImporter.importPrepared(
+      comicId: comic.id,
+      selection: selection,
+      duplicatePolicy: DuplicatePolicy.keep,
+    );
+    expect(report.imported, 5);
+    expect(report.failures, isEmpty);
+
+    final names = (await repository.loadItems(
+      comic.id,
+    )).map((item) => item.asset.originalFileName).toList(growable: false);
+    expect(names, <String>[
+      'existing.png',
+      '1.png',
+      '2.png',
+      '10.png',
+      '003.png',
+      '004.png',
+    ]);
   });
 }
 
@@ -264,6 +323,30 @@ Future<File> _createPng(Directory directory, String name) async {
   img.fill(image, color: img.ColorRgb8(35, 117, 199));
   final file = File(p.join(directory.path, name));
   await file.writeAsBytes(img.encodePng(image), flush: true);
+  return file;
+}
+
+List<int> _pngBytes(int seed) {
+  final image = img.Image(width: 4, height: 6);
+  img.fill(
+    image,
+    color: img.ColorRgb8(seed * 17 % 255, seed * 31 % 255, seed * 47 % 255),
+  );
+  return img.encodePng(image);
+}
+
+Future<File> _createZip(
+  Directory directory,
+  String name,
+  Map<String, List<int>> entries,
+) async {
+  final archive = legacy_archive.Archive();
+  for (final entry in entries.entries) {
+    archive.addFile(legacy_archive.ArchiveFile.bytes(entry.key, entry.value));
+  }
+  final bytes = legacy_archive.ZipEncoder().encodeBytes(archive);
+  final file = File(p.join(directory.path, name));
+  await file.writeAsBytes(bytes, flush: true);
   return file;
 }
 

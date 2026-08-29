@@ -15,8 +15,8 @@ class TrashScreen extends StatefulWidget {
 }
 
 class _TrashScreenState extends State<TrashScreen> {
-  late Future<List<ComicSummary>> _items =
-      widget.controller.loadDeletedComics();
+  late Future<List<ComicSummary>> _items = widget.controller
+      .loadDeletedComics();
 
   void _reload() {
     setState(() => _items = widget.controller.loadDeletedComics());
@@ -35,10 +35,7 @@ class _TrashScreenState extends State<TrashScreen> {
           final items = snapshot.data!;
           if (items.isEmpty) {
             return const Center(
-              child: Text(
-                '回收站是空的',
-                style: TextStyle(color: ShelfColors.muted),
-              ),
+              child: Text('回收站是空的', style: TextStyle(color: ShelfColors.muted)),
             );
           }
           return ListView.separated(
@@ -58,7 +55,9 @@ class _TrashScreenState extends State<TrashScreen> {
                         ? const DecoratedBox(
                             decoration: BoxDecoration(
                               color: ShelfColors.blueSoft,
-                              borderRadius: BorderRadius.all(Radius.circular(8)),
+                              borderRadius: BorderRadius.all(
+                                Radius.circular(8),
+                              ),
                             ),
                             child: Icon(Icons.image_outlined),
                           )

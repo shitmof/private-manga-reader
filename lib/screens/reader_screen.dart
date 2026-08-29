@@ -93,24 +93,33 @@ class _ReaderScreenState extends State<ReaderScreen>
                   final item = _items[index];
                   final height = _displayHeight(item, width);
                   return Padding(
-                    padding: EdgeInsets.only(bottom: index == _items.length - 1 ? 0 : gap),
+                    padding: EdgeInsets.only(
+                      bottom: index == _items.length - 1 ? 0 : gap,
+                    ),
                     child: GestureDetector(
                       onDoubleTap: () => _showZoom(item),
                       child: SizedBox(
                         width: width,
                         height: height,
                         child: Image.file(
-                          File(widget.controller.filePath(item.asset.storedPath)),
+                          File(
+                            widget.controller.filePath(item.asset.storedPath),
+                          ),
                           fit: BoxFit.contain,
                           alignment: Alignment.topCenter,
-                          cacheWidth: (width * MediaQuery.devicePixelRatioOf(context))
-                              .round()
-                              .clamp(360, 2400),
+                          cacheWidth:
+                              (width * MediaQuery.devicePixelRatioOf(context))
+                                  .round()
+                                  .clamp(360, 2400),
                           filterQuality: FilterQuality.medium,
-                          errorBuilder: (context, error, stackTrace) => const Center(
-                            child: Icon(Icons.broken_image_outlined,
-                                size: 42, color: Colors.white54),
-                          ),
+                          errorBuilder: (context, error, stackTrace) =>
+                              const Center(
+                                child: Icon(
+                                  Icons.broken_image_outlined,
+                                  size: 42,
+                                  color: Colors.white54,
+                                ),
+                              ),
                         ),
                       ),
                     ),
@@ -131,7 +140,8 @@ class _ReaderScreenState extends State<ReaderScreen>
               ),
             ),
             _ReaderBottomBar(
-              visible: _controlsVisible &&
+              visible:
+                  _controlsVisible &&
                   widget.controller.preferences.showPageNumber,
               current: _items.isEmpty ? 0 : _currentIndex + 1,
               total: _items.length,
@@ -150,11 +160,14 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _restoreProgress() {
     if (!_scrollController.hasClients || _items.isEmpty) return;
     final comic = widget.controller.summaryFor(widget.comicId)?.comic;
-    if (comic == null || !widget.controller.preferences.rememberProgress) return;
+    if (comic == null || !widget.controller.preferences.rememberProgress) {
+      return;
+    }
     final targetIndex = comic.lastReadPosition.clamp(0, _items.length - 1);
     var offset = 0.0;
     for (var index = 0; index < targetIndex; index++) {
-      offset += _displayHeight(_items[index], _lastLayoutWidth) +
+      offset +=
+          _displayHeight(_items[index], _lastLayoutWidth) +
           widget.controller.preferences.imageGap;
     }
     offset += comic.lastReadOffset;
@@ -280,7 +293,10 @@ class _ReaderTopBar extends StatelessWidget {
                       itemBuilder: (context) => const <PopupMenuEntry<String>>[
                         PopupMenuItem(
                           value: 'restart',
-                          child: Text('从头开始', style: TextStyle(color: Colors.white)),
+                          child: Text(
+                            '从头开始',
+                            style: TextStyle(color: Colors.white),
+                          ),
                         ),
                       ],
                     ),
@@ -323,7 +339,10 @@ class _ReaderBottomBar extends StatelessWidget {
               child: SafeArea(
                 top: false,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 13,
+                  ),
                   child: Row(
                     children: <Widget>[
                       Expanded(

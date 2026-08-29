@@ -58,8 +58,11 @@ class ComicDetailScreen extends StatelessWidget {
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: const Center(
-                            child: Icon(Icons.image_outlined,
-                                size: 48, color: ShelfColors.blue),
+                            child: Icon(
+                              Icons.image_outlined,
+                              size: 48,
+                              color: ShelfColors.blue,
+                            ),
                           ),
                         )
                       : PrivateImage(
@@ -74,9 +77,19 @@ class ComicDetailScreen extends StatelessWidget {
               const SizedBox(height: 22),
               Row(
                 children: <Widget>[
-                  Expanded(child: _Metric(label: '图片', value: '${summary.itemCount} 张')),
+                  Expanded(
+                    child: _Metric(
+                      label: '图片',
+                      value: '${summary.itemCount} 张',
+                    ),
+                  ),
                   const SizedBox(width: 10),
-                  Expanded(child: _Metric(label: '原图占用', value: formatBytes(summary.totalBytes))),
+                  Expanded(
+                    child: _Metric(
+                      label: '原图占用',
+                      value: formatBytes(summary.totalBytes),
+                    ),
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: _Metric(
@@ -100,9 +113,7 @@ class ComicDetailScreen extends StatelessWidget {
                     ),
                   ),
                   icon: const Icon(Icons.auto_stories_outlined),
-                  label: Text(
-                    comic.lastReadPosition > 0 ? '继续阅读' : '开始阅读',
-                  ),
+                  label: Text(comic.lastReadPosition > 0 ? '继续阅读' : '开始阅读'),
                 ),
                 const SizedBox(height: 10),
                 OutlinedButton.icon(
@@ -168,9 +179,9 @@ class ComicDetailScreen extends StatelessWidget {
               Text(
                 '创建于 ${formatDate(comic.createdAt)} · 最多 1000 张',
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: ShelfColors.muted,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: ShelfColors.muted),
               ),
             ],
           ),
@@ -187,10 +198,15 @@ class ComicDetailScreen extends StatelessWidget {
         title: const Text('重命名'),
         content: TextField(controller: text, autofocus: true, maxLength: 80),
         actions: <Widget>[
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
           FilledButton(
             onPressed: () {
-              if (text.text.trim().isNotEmpty) Navigator.pop(context, text.text.trim());
+              if (text.text.trim().isNotEmpty) {
+                Navigator.pop(context, text.text.trim());
+              }
             },
             child: const Text('保存'),
           ),
@@ -207,7 +223,10 @@ class ComicDetailScreen extends StatelessWidget {
         title: const Text('删除这本漫画？'),
         content: const Text('漫画会移到回收站，可以稍后恢复。原图不会立即删除。'),
         actions: <Widget>[
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
@@ -226,14 +245,16 @@ class ComicDetailScreen extends StatelessWidget {
       final file = await controller.createAndShareBackup();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('备份已创建：${file.path.split(RegExp(r'[/\\]')).last}')),
+          SnackBar(
+            content: Text('备份已创建：${file.path.split(RegExp(r'[/\\]')).last}'),
+          ),
         );
       }
     } catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('备份失败：$error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('备份失败：$error')));
       }
     }
   }
@@ -256,17 +277,21 @@ class _Metric extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(label,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: ShelfColors.muted,
-                  )),
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: ShelfColors.muted),
+          ),
           const SizedBox(height: 4),
-          Text(value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  )),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+          ),
         ],
       ),
     );

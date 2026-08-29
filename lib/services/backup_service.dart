@@ -36,10 +36,7 @@ class BackupService {
       for (final asset in assets) {
         final source = File(_storage.resolve(asset.storedPath));
         if (!await source.exists()) {
-          throw FileSystemException(
-            '原图缺失，已停止备份',
-            asset.originalFileName,
-          );
+          throw FileSystemException('原图缺失，已停止备份', asset.originalFileName);
         }
         final target = File(p.join(staging.path, asset.storedPath));
         await target.parent.create(recursive: true);
@@ -64,18 +61,16 @@ class BackupService {
       ShareParams(
         title: '导出私人书架备份',
         text: '私人书架完整本地备份',
-        files: <XFile>[
-          XFile(backup.path, mimeType: 'application/zip'),
-        ],
+        files: <XFile>[XFile(backup.path, mimeType: 'application/zip')],
       ),
     );
   }
 
   Future<PlatformFile?> pickBackup() => FilePicker.pickFile(
-        type: FileType.custom,
-        allowedExtensions: const <String>['mangabackup', 'zip'],
-        dialogTitle: '选择私人书架备份',
-      );
+    type: FileType.custom,
+    allowedExtensions: const <String>['mangabackup', 'zip'],
+    dialogTitle: '选择私人书架备份',
+  );
 
   Future<File> restoreBackup(PlatformFile source) async {
     final restoreRoot = Directory(
@@ -142,12 +137,14 @@ class BackupService {
 
   List<AssetRecord> _assetRows(Object? value) {
     if (value is! List) throw const FormatException('备份缺少原图清单');
-    return value.map((row) {
-      if (row is! Map) throw const FormatException('原图清单结构错误');
-      return AssetRecord.fromMap(
-        row.map((key, value) => MapEntry(key.toString(), value)),
-      );
-    }).toList(growable: false);
+    return value
+        .map((row) {
+          if (row is! Map) throw const FormatException('原图清单结构错误');
+          return AssetRecord.fromMap(
+            row.map((key, value) => MapEntry(key.toString(), value)),
+          );
+        })
+        .toList(growable: false);
   }
 
   String _timestamp(DateTime time) {

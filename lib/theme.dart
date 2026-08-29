@@ -30,7 +30,10 @@ ThemeData buildShelfTheme(Brightness brightness) {
       'Microsoft YaHei',
     ],
     textTheme: const TextTheme(
-      headlineMedium: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.8),
+      headlineMedium: TextStyle(
+        fontWeight: FontWeight.w800,
+        letterSpacing: -0.8,
+      ),
       titleLarge: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.35),
       titleMedium: TextStyle(fontWeight: FontWeight.w700),
       bodyMedium: TextStyle(height: 1.45),
@@ -53,9 +56,7 @@ ThemeData buildShelfTheme(Brightness brightness) {
       color: scheme.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: BorderSide(
-          color: dark ? Colors.white10 : ShelfColors.line,
-        ),
+        side: BorderSide(color: dark ? Colors.white10 : ShelfColors.line),
       ),
     ),
     filledButtonTheme: FilledButtonThemeData(

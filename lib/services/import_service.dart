@@ -32,16 +32,14 @@ class ImportService {
   final LibraryRepository _repository;
   final StorageService _storage;
 
-  Future<List<PlatformFile>> pickFromGallery() => FilePicker.pickFiles(
-        type: FileType.image,
-        dialogTitle: '从相册选择图片',
-      );
+  Future<List<PlatformFile>> pickFromGallery() =>
+      FilePicker.pickFiles(type: FileType.image, dialogTitle: '从相册选择图片');
 
   Future<List<PlatformFile>> pickFromFiles() => FilePicker.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: _extensions,
-        dialogTitle: '从文件选择图片',
-      );
+    type: FileType.custom,
+    allowedExtensions: _extensions,
+    dialogTitle: '从文件选择图片',
+  );
 
   Future<int> estimateBytes(List<PlatformFile> files) async {
     var total = 0;
@@ -60,16 +58,15 @@ class ImportService {
     var imported = 0;
     var skipped = 0;
     final failures = <ImportFailure>[];
-    var remaining = LibraryRepository.maxItemsPerComic -
+    var remaining =
+        LibraryRepository.maxItemsPerComic -
         await _repository.itemCount(comicId);
 
     for (var index = 0; index < files.length; index++) {
       final source = files[index];
       onProgress?.call(index, files.length, source.name);
       if (remaining <= 0) {
-        failures.add(
-          ImportFailure(source.name, '已达到单本 1000 张上限', index),
-        );
+        failures.add(ImportFailure(source.name, '已达到单本 1000 张上限', index));
         continue;
       }
       File? temporary;
@@ -80,8 +77,10 @@ class ImportService {
         temporary = copied.file;
         final existing = await _repository.findAssetByHash(copied.hash);
         if (existing != null) {
-          final alreadyUsed =
-              await _repository.comicContainsAsset(comicId, existing.id);
+          final alreadyUsed = await _repository.comicContainsAsset(
+            comicId,
+            existing.id,
+          );
           if (alreadyUsed && duplicatePolicy == DuplicatePolicy.skip) {
             skipped++;
             await temporary.delete();
@@ -142,9 +141,7 @@ class ImportService {
           if (await original.exists()) await original.delete();
           if (await thumbnail.exists()) await thumbnail.delete();
         }
-        failures.add(
-          ImportFailure(source.name, _friendlyError(error), index),
-        );
+        failures.add(ImportFailure(source.name, _friendlyError(error), index));
       }
     }
     onProgress?.call(files.length, files.length, '完成');
@@ -202,18 +199,23 @@ class ImportService {
     final width = decoded.width;
     final height = decoded.height;
     final thumbnail = width > 512
-        ? img.copyResize(decoded, width: 512, interpolation: img.Interpolation.average)
+        ? img.copyResize(
+            decoded,
+            width: 512,
+            interpolation: img.Interpolation.average,
+          )
         : decoded;
     final target = File(p.join(_storage.thumbnailsDirectory.path, '$hash.jpg'));
-    await target.writeAsBytes(img.encodeJpg(thumbnail, quality: 82), flush: true);
+    await target.writeAsBytes(
+      img.encodeJpg(thumbnail, quality: 82),
+      flush: true,
+    );
     return (width, height);
   }
 
   String _safeExtension(String? extension) {
     final normalized = (extension ?? 'img').toLowerCase();
-    return RegExp(r'^[a-z0-9]{1,8}$').hasMatch(normalized)
-        ? normalized
-        : 'img';
+    return RegExp(r'^[a-z0-9]{1,8}$').hasMatch(normalized) ? normalized : 'img';
   }
 
   String _friendlyError(Object error) {

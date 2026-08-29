@@ -24,18 +24,18 @@ class Comic {
   final DateTime? deletedAt;
 
   factory Comic.fromMap(Map<String, Object?> map) => Comic(
-        id: map['id']! as String,
-        title: map['title']! as String,
-        coverAssetId: map['cover_asset_id'] as String?,
-        sortIndex: map['sort_index']! as int,
-        createdAt: DateTime.parse(map['created_at']! as String),
-        updatedAt: DateTime.parse(map['updated_at']! as String),
-        lastReadPosition: map['last_read_position']! as int,
-        lastReadOffset: (map['last_read_offset']! as num).toDouble(),
-        deletedAt: map['deleted_at'] == null
-            ? null
-            : DateTime.parse(map['deleted_at']! as String),
-      );
+    id: map['id']! as String,
+    title: map['title']! as String,
+    coverAssetId: map['cover_asset_id'] as String?,
+    sortIndex: map['sort_index']! as int,
+    createdAt: DateTime.parse(map['created_at']! as String),
+    updatedAt: DateTime.parse(map['updated_at']! as String),
+    lastReadPosition: map['last_read_position']! as int,
+    lastReadOffset: (map['last_read_offset']! as num).toDouble(),
+    deletedAt: map['deleted_at'] == null
+        ? null
+        : DateTime.parse(map['deleted_at']! as String),
+  );
 }
 
 class AssetRecord {
@@ -66,32 +66,32 @@ class AssetRecord {
   final DateTime createdAt;
 
   Map<String, Object?> toMap() => <String, Object?>{
-        'id': id,
-        'content_hash': contentHash,
-        'original_file_name': originalFileName,
-        'mime_type': mimeType,
-        'extension': extension,
-        'byte_size': byteSize,
-        'width': width,
-        'height': height,
-        'stored_path': storedPath,
-        'thumbnail_path': thumbnailPath,
-        'created_at': createdAt.toIso8601String(),
-      };
+    'id': id,
+    'content_hash': contentHash,
+    'original_file_name': originalFileName,
+    'mime_type': mimeType,
+    'extension': extension,
+    'byte_size': byteSize,
+    'width': width,
+    'height': height,
+    'stored_path': storedPath,
+    'thumbnail_path': thumbnailPath,
+    'created_at': createdAt.toIso8601String(),
+  };
 
   factory AssetRecord.fromMap(Map<String, Object?> map) => AssetRecord(
-        id: map['id']! as String,
-        contentHash: map['content_hash']! as String,
-        originalFileName: map['original_file_name']! as String,
-        mimeType: map['mime_type']! as String,
-        extension: map['extension']! as String,
-        byteSize: map['byte_size']! as int,
-        width: map['width']! as int,
-        height: map['height']! as int,
-        storedPath: map['stored_path']! as String,
-        thumbnailPath: map['thumbnail_path']! as String,
-        createdAt: DateTime.parse(map['created_at']! as String),
-      );
+    id: map['id']! as String,
+    contentHash: map['content_hash']! as String,
+    originalFileName: map['original_file_name']! as String,
+    mimeType: map['mime_type']! as String,
+    extension: map['extension']! as String,
+    byteSize: map['byte_size']! as int,
+    width: map['width']! as int,
+    height: map['height']! as int,
+    storedPath: map['stored_path']! as String,
+    thumbnailPath: map['thumbnail_path']! as String,
+    createdAt: DateTime.parse(map['created_at']! as String),
+  );
 }
 
 class ComicItemRecord {
@@ -164,13 +164,12 @@ class ReaderPreferences {
     bool? showPageNumber,
     bool? rememberProgress,
     AppThemePreference? theme,
-  }) =>
-      ReaderPreferences(
-        imageGap: imageGap ?? this.imageGap,
-        showPageNumber: showPageNumber ?? this.showPageNumber,
-        rememberProgress: rememberProgress ?? this.rememberProgress,
-        theme: theme ?? this.theme,
-      );
+  }) => ReaderPreferences(
+    imageGap: imageGap ?? this.imageGap,
+    showPageNumber: showPageNumber ?? this.showPageNumber,
+    rememberProgress: rememberProgress ?? this.rememberProgress,
+    theme: theme ?? this.theme,
+  );
 }
 
 enum DuplicatePolicy { skip, keep }

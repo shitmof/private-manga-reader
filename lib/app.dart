@@ -59,8 +59,10 @@ class _OperationOverlay extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text(progress.title,
-                        style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      progress.title,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                     const SizedBox(height: 16),
                     LinearProgressIndicator(value: progress.fraction),
                     const SizedBox(height: 12),
