@@ -15,6 +15,7 @@ class StorageService {
   late final Directory thumbnailsDirectory;
   late final Directory temporaryDirectory;
   late final Directory backupsDirectory;
+  late final Directory networkCacheDirectory;
 
   Future<void> initialize() async {
     final override = rootOverride;
@@ -28,12 +29,14 @@ class StorageService {
     thumbnailsDirectory = Directory(p.join(root.path, 'thumbnails'));
     temporaryDirectory = Directory(p.join(root.path, 'backup-temp'));
     backupsDirectory = Directory(p.join(root.path, 'backups'));
+    networkCacheDirectory = Directory(p.join(root.path, 'network-cache'));
     for (final directory in <Directory>[
       root,
       assetsDirectory,
       thumbnailsDirectory,
       temporaryDirectory,
       backupsDirectory,
+      networkCacheDirectory,
     ]) {
       await directory.create(recursive: true);
     }
@@ -65,6 +68,15 @@ class StorageService {
   }
 
   Future<int> thumbnailBytes() => directoryBytes(thumbnailsDirectory);
+
+  Future<int> networkCacheBytes() => directoryBytes(networkCacheDirectory);
+
+  Directory networkBookCacheDirectory(String bookId) {
+    if (!RegExp(r'^[a-zA-Z0-9-]{1,80}$').hasMatch(bookId)) {
+      throw const FormatException('无效的网络漫画缓存标识');
+    }
+    return Directory(p.join(networkCacheDirectory.path, bookId));
+  }
 
   Future<void> clearThumbnails() async {
     if (await thumbnailsDirectory.exists()) {

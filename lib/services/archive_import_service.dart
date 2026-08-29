@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image/image.dart' as img;
 import 'package:koni_archive/io.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
@@ -236,6 +237,61 @@ class ArchiveImportService {
       skippedDuplicates: skipped,
       failures: failures,
     );
+  }
+
+  Future<List<ExtractedArchivePage>> extractPreparedToDirectory({
+    required PreparedArchive archive,
+    required Directory target,
+    ImportProgress? onProgress,
+  }) async {
+    if (await target.exists()) {
+      throw const FileSystemException('缓存目标目录已存在');
+    }
+    await target.create(recursive: true);
+    Archive? opened;
+    final extracted = <ExtractedArchivePage>[];
+    try {
+      opened = await _open(archive.localFile.path);
+      for (var index = 0; index < archive.pages.length; index++) {
+        final page = archive.pages[index];
+        onProgress?.call(index, archive.pages.length, page.path);
+        final entry = opened.entry(page.path);
+        if (entry == null || !entry.isFile) {
+          throw FormatException('压缩包页面索引已变化：${page.path}');
+        }
+        final extension = p.posix.extension(page.path).toLowerCase();
+        final file = File(
+          p.join(target.path, '${index.toString().padLeft(6, '0')}$extension'),
+        );
+        final sink = file.openWrite();
+        try {
+          await for (final chunk in opened.openRead(entry)) {
+            sink.add(chunk);
+          }
+          await sink.close();
+        } catch (_) {
+          await sink.close();
+          rethrow;
+        }
+        final decoded = await img.decodeImageFile(file.path);
+        extracted.add(
+          ExtractedArchivePage(
+            file: file,
+            originalName: p.posix.basename(page.path),
+            byteSize: await file.length(),
+            width: decoded?.width ?? 0,
+            height: decoded?.height ?? 0,
+          ),
+        );
+      }
+      onProgress?.call(archive.pages.length, archive.pages.length, '完成');
+      return extracted;
+    } catch (_) {
+      if (await target.exists()) await target.delete(recursive: true);
+      rethrow;
+    } finally {
+      await opened?.close();
+    }
   }
 
   Future<Archive> _open(String path) => openArchiveFile(
@@ -499,6 +555,22 @@ class PreparedArchivePage {
 
   final String path;
   final int uncompressedBytes;
+}
+
+class ExtractedArchivePage {
+  const ExtractedArchivePage({
+    required this.file,
+    required this.originalName,
+    required this.byteSize,
+    required this.width,
+    required this.height,
+  });
+
+  final File file;
+  final String originalName;
+  final int byteSize;
+  final int width;
+  final int height;
 }
 
 class _ComicInfo {

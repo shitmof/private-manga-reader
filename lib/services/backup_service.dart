@@ -102,7 +102,7 @@ class BackupService {
         (key, value) => MapEntry(key.toString(), value),
       );
       if (manifest['format'] != 'private-manga-reader-backup' ||
-          manifest['version'] != 1) {
+          (manifest['version'] != 1 && manifest['version'] != 2)) {
         throw const FormatException('不支持的备份版本');
       }
       final assets = _assetRows(manifest['assets']);
@@ -129,6 +129,12 @@ class BackupService {
         }
       }
       await _repository.replaceFromManifest(manifest);
+      if (manifest['version'] == 2) {
+        if (await _storage.networkCacheDirectory.exists()) {
+          await _storage.networkCacheDirectory.delete(recursive: true);
+        }
+        await _storage.networkCacheDirectory.create(recursive: true);
+      }
       return safetyBackup;
     } finally {
       if (await restoreRoot.exists()) await restoreRoot.delete(recursive: true);

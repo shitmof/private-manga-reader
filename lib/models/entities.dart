@@ -174,6 +174,166 @@ class ReaderPreferences {
 
 enum DuplicatePolicy { skip, keep }
 
+enum NetworkSourceType { webdav, opds, smb }
+
+class NetworkSource {
+  const NetworkSource({
+    required this.id,
+    required this.name,
+    required this.type,
+    required this.endpoint,
+    required this.rootPath,
+    required this.username,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String name;
+  final NetworkSourceType type;
+  final String endpoint;
+  final String rootPath;
+  final String username;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  factory NetworkSource.fromMap(Map<String, Object?> map) => NetworkSource(
+    id: map['id']! as String,
+    name: map['name']! as String,
+    type: NetworkSourceType.values.byName(map['type']! as String),
+    endpoint: map['endpoint']! as String,
+    rootPath: map['root_path']! as String,
+    username: map['username']! as String,
+    createdAt: DateTime.parse(map['created_at']! as String),
+    updatedAt: DateTime.parse(map['updated_at']! as String),
+  );
+}
+
+class NetworkCredentials {
+  const NetworkCredentials({
+    this.username = '',
+    this.password = '',
+    this.domain = '',
+  });
+
+  final String username;
+  final String password;
+  final String domain;
+}
+
+class RemoteBookDiscovery {
+  const RemoteBookDiscovery({
+    required this.title,
+    required this.remoteUri,
+    required this.mediaType,
+    required this.etag,
+    required this.byteSize,
+  });
+
+  final String title;
+  final String remoteUri;
+  final String mediaType;
+  final String etag;
+  final int byteSize;
+}
+
+class RemoteBook {
+  const RemoteBook({
+    required this.id,
+    required this.sourceId,
+    required this.title,
+    required this.remoteUri,
+    required this.mediaType,
+    required this.etag,
+    required this.byteSize,
+    required this.sortIndex,
+    required this.pageCount,
+    required this.lastReadPosition,
+    required this.lastReadOffset,
+    required this.isAvailable,
+    required this.createdAt,
+    required this.updatedAt,
+    this.coverRelativePath,
+    this.cachedVersion,
+    this.cachedAt,
+  });
+
+  final String id;
+  final String sourceId;
+  final String title;
+  final String remoteUri;
+  final String mediaType;
+  final String etag;
+  final int byteSize;
+  final int sortIndex;
+  final int pageCount;
+  final String? coverRelativePath;
+  final int lastReadPosition;
+  final double lastReadOffset;
+  final String? cachedVersion;
+  final DateTime? cachedAt;
+  final bool isAvailable;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  bool get isCached => pageCount > 0 && cachedVersion == etag;
+
+  factory RemoteBook.fromMap(Map<String, Object?> map) => RemoteBook(
+    id: map['id']! as String,
+    sourceId: map['source_id']! as String,
+    title: map['title']! as String,
+    remoteUri: map['remote_uri']! as String,
+    mediaType: map['media_type']! as String,
+    etag: map['etag']! as String,
+    byteSize: map['byte_size']! as int,
+    sortIndex: map['sort_index']! as int,
+    pageCount: map['page_count']! as int,
+    coverRelativePath: map['cover_relative_path'] as String?,
+    lastReadPosition: map['last_read_position']! as int,
+    lastReadOffset: (map['last_read_offset']! as num).toDouble(),
+    cachedVersion: map['cached_version'] as String?,
+    cachedAt: map['cached_at'] == null
+        ? null
+        : DateTime.parse(map['cached_at']! as String),
+    isAvailable: (map['is_available']! as int) == 1,
+    createdAt: DateTime.parse(map['created_at']! as String),
+    updatedAt: DateTime.parse(map['updated_at']! as String),
+  );
+}
+
+class RemotePage {
+  const RemotePage({
+    required this.id,
+    required this.bookId,
+    required this.position,
+    required this.relativePath,
+    required this.originalName,
+    required this.byteSize,
+    required this.width,
+    required this.height,
+  });
+
+  final String id;
+  final String bookId;
+  final int position;
+  final String relativePath;
+  final String originalName;
+  final int byteSize;
+  final int width;
+  final int height;
+
+  factory RemotePage.fromMap(Map<String, Object?> map) => RemotePage(
+    id: map['id']! as String,
+    bookId: map['book_id']! as String,
+    position: map['position']! as int,
+    relativePath: map['relative_path']! as String,
+    originalName: map['original_name']! as String,
+    byteSize: map['byte_size']! as int,
+    width: map['width']! as int,
+    height: map['height']! as int,
+  );
+}
+
 class ImportFailure {
   const ImportFailure(this.fileName, this.reason, this.sourceIndex);
   final String fileName;

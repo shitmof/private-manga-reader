@@ -453,9 +453,21 @@ class LibraryRepository {
 
   Future<Map<String, Object?>> exportManifest() async {
     final db = await _database.instance;
+    final remoteBooks =
+        (await db.query('remote_books', orderBy: 'source_id, sort_index'))
+            .map((row) {
+              return <String, Object?>{
+                ...row,
+                'page_count': 0,
+                'cover_relative_path': null,
+                'cached_version': null,
+                'cached_at': null,
+              };
+            })
+            .toList(growable: false);
     return <String, Object?>{
       'format': 'private-manga-reader-backup',
-      'version': 1,
+      'version': 2,
       'createdAt': DateTime.now().toUtc().toIso8601String(),
       'comics': await db.query('comics', orderBy: 'sort_index'),
       'assets': await db.query('assets'),
@@ -464,12 +476,19 @@ class LibraryRepository {
         orderBy: 'comic_id, position',
       ),
       'settings': await db.query('settings'),
+      'networkSources': await db.query(
+        'network_sources',
+        orderBy: 'created_at',
+      ),
+      'remoteBooks': remoteBooks,
+      'remotePages': const <Map<String, Object?>>[],
     };
   }
 
   Future<void> replaceFromManifest(Map<String, Object?> manifest) async {
+    final version = manifest['version'];
     if (manifest['format'] != 'private-manga-reader-backup' ||
-        manifest['version'] != 1) {
+        (version != 1 && version != 2)) {
       throw const FormatException('不支持的备份格式');
     }
     final db = await _database.instance;
@@ -477,7 +496,21 @@ class LibraryRepository {
     final comics = _rows(manifest['comics']);
     final items = _rows(manifest['comicItems']);
     final settings = _rows(manifest['settings']);
+    final networkSources = version == 2
+        ? _rows(manifest['networkSources'])
+        : const <Map<String, Object?>>[];
+    final remoteBooks = version == 2
+        ? _rows(manifest['remoteBooks'])
+        : const <Map<String, Object?>>[];
+    final remotePages = version == 2
+        ? _rows(manifest['remotePages'])
+        : const <Map<String, Object?>>[];
     await db.transaction((txn) async {
+      if (version == 2) {
+        await txn.delete('remote_pages');
+        await txn.delete('remote_books');
+        await txn.delete('network_sources');
+      }
       await txn.delete('comic_items');
       await txn.delete('comics');
       await txn.delete('assets');
@@ -493,6 +526,15 @@ class LibraryRepository {
       }
       for (final row in settings) {
         await txn.insert('settings', row);
+      }
+      for (final row in networkSources) {
+        await txn.insert('network_sources', row);
+      }
+      for (final row in remoteBooks) {
+        await txn.insert('remote_books', row);
+      }
+      for (final row in remotePages) {
+        await txn.insert('remote_pages', row);
       }
     });
   }

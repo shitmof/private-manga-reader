@@ -32,8 +32,10 @@ class ImportService {
   final LibraryRepository _repository;
   final StorageService _storage;
 
-  Future<List<PlatformFile>> pickFromGallery() =>
-      FilePicker.pickFiles(type: FileType.image, dialogTitle: '从相册选择图片');
+  Future<List<PlatformFile>> pickFromGallery() => FilePicker.pickFiles(
+    type: FileType.image,
+    dialogTitle: '从相册选择图片',
+  );
 
   Future<List<PlatformFile>> pickFromFiles() => FilePicker.pickFiles(
     type: FileType.custom,

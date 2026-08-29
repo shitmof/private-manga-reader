@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -10,10 +11,13 @@ import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:private_manga_reader/data/app_database.dart';
 import 'package:private_manga_reader/data/library_repository.dart';
+import 'package:private_manga_reader/data/network_repository.dart';
 import 'package:private_manga_reader/models/entities.dart';
 import 'package:private_manga_reader/services/backup_service.dart';
 import 'package:private_manga_reader/services/archive_import_service.dart';
 import 'package:private_manga_reader/services/import_service.dart';
+import 'package:private_manga_reader/services/network_credential_store.dart';
+import 'package:private_manga_reader/services/network_library_service.dart';
 import 'package:private_manga_reader/services/storage_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -241,11 +245,32 @@ void main() {
     final item = (await repository.loadItems(comic.id)).single;
     await repository.setCover(comic.id, item.asset.id);
     await repository.saveProgress(comic.id, 0, 12.5);
+    final network = NetworkRepository(database);
+    final networkSource = await network.createSource(
+      name: '备份网络书库',
+      type: NetworkSourceType.opds,
+      endpoint: 'https://example.test/opds',
+      rootPath: '',
+      username: 'reader',
+    );
+    await network
+        .upsertDiscoveredBooks(networkSource.id, const <RemoteBookDiscovery>[
+          RemoteBookDiscovery(
+            title: '远程漫画',
+            remoteUri: 'https://example.test/book.cbz',
+            mediaType: 'application/vnd.comicbook+zip',
+            etag: 'remote-v1',
+            byteSize: 99,
+          ),
+        ]);
+    final remoteBook = (await network.loadBooks(networkSource.id)).single;
+    await network.saveProgress(remoteBook.id, 8, 6.5);
     final backupService = BackupService(repository, storage);
     final backup = await backupService.createBackup();
 
     await repository.renameComic(comic.id, '被修改');
     await repository.removeItem(item.id);
+    await network.deleteSource(networkSource.id);
     await backupService.restoreBackup(_TestPlatformFile(backup));
 
     final restored = await repository.getComic(comic.id);
@@ -262,6 +287,14 @@ void main() {
       (await sha256.bind(restoredFile.openRead()).first).toString(),
       item.asset.contentHash,
     );
+    final restoredSources = await network.loadSources();
+    expect(restoredSources.single.name, '备份网络书库');
+    final restoredRemote = (await network.loadBooks(
+      restoredSources.single.id,
+    )).single;
+    expect(restoredRemote.lastReadPosition, 8);
+    expect(restoredRemote.lastReadOffset, 6.5);
+    expect(restoredRemote.pageCount, 0, reason: '网络缓存不应进入完整备份');
   });
 
   test('多个漫画压缩包按选择队列与文件名自然顺序连续追加', () async {
@@ -315,6 +348,284 @@ void main() {
       '003.png',
       '004.png',
     ]);
+  });
+
+  test('CBZ、CBR、CB7 与 CBT 真实容器都能识别并读取漫画页', () async {
+    final archiveImporter = ArchiveImportService(repository, storage, importer);
+    final fixtures = <String, String>{
+      'synthetic_comic.cbz': 'zip',
+      'synthetic_comic.cbr': 'rar',
+      'synthetic_comic.cb7': '7z',
+      'synthetic_comic.cbt': 'tar',
+    };
+    for (final fixture in fixtures.entries) {
+      final file = File(
+        p.join(
+          Directory.current.path,
+          'test',
+          'fixtures',
+          'archives',
+          fixture.key,
+        ),
+      );
+      final selection = await archiveImporter.prepareArchives(<PlatformFile>[
+        _TestPlatformFile(file),
+      ]);
+      try {
+        expect(selection.archives.single.format, fixture.value);
+        expect(selection.totalPages, 3);
+      } finally {
+        await selection.dispose();
+      }
+    }
+  });
+
+  test('v3 网络书库只保存索引、缓存状态与本地阅读进度', () async {
+    final network = NetworkRepository(database);
+    final source = await network.createSource(
+      name: '家庭 NAS',
+      type: NetworkSourceType.webdav,
+      endpoint: 'https://dav.example.test',
+      rootPath: '/manga',
+      username: 'reader',
+    );
+    await network.upsertDiscoveredBooks(source.id, <RemoteBookDiscovery>[
+      const RemoteBookDiscovery(
+        title: '第一卷',
+        remoteUri: 'https://dav.example.test/manga/vol-1.cbz',
+        mediaType: 'application/vnd.comicbook+zip',
+        etag: 'v1',
+        byteSize: 1234,
+      ),
+    ]);
+    final books = await network.loadBooks(source.id);
+    expect(books, hasLength(1));
+    expect(books.single.lastReadPosition, 0);
+
+    await network.replaceCachedPages(
+      books.single.id,
+      cachedVersion: 'v1',
+      pages: <RemotePage>[
+        const RemotePage(
+          id: 'page-1',
+          bookId: '',
+          position: 0,
+          relativePath: 'network-cache/book/page-0001.png',
+          originalName: '001.png',
+          byteSize: 321,
+          width: 10,
+          height: 20,
+        ),
+      ],
+    );
+    await network.saveProgress(books.single.id, 0, 42.5);
+    final cached = await network.getBook(books.single.id);
+    expect(cached?.pageCount, 1);
+    expect(cached?.lastReadOffset, 42.5);
+    expect(
+      (await network.loadPages(books.single.id)).single.originalName,
+      '001.png',
+    );
+
+    await network.clearCachedPages(books.single.id);
+    final cleared = await network.getBook(books.single.id);
+    expect(cleared?.pageCount, 0);
+    expect(cleared?.lastReadOffset, 42.5, reason: '清缓存不得清阅读记录');
+    expect(await network.loadPages(books.single.id), isEmpty);
+
+    await network.deleteSource(source.id);
+    expect(await network.loadSources(), isEmpty);
+    expect(await network.loadBooks(source.id), isEmpty);
+  });
+
+  test('WebDAV 挂载可扫描远程 CBZ、按需缓存并保持页面顺序', () async {
+    final archiveFile = await _createZip(
+      sandbox,
+      'remote.cbz',
+      <String, List<int>>{
+        '10.png': _pngBytes(10),
+        '2.png': _pngBytes(2),
+        '1.png': _pngBytes(1),
+      },
+    );
+    final archiveBytes = await archiveFile.readAsBytes();
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(server.close);
+    server.listen((request) async {
+      if (request.method == 'PROPFIND') {
+        request.response.statusCode = HttpStatus.multiStatus;
+        request.response.headers.contentType = ContentType(
+          'application',
+          'xml',
+        );
+        request.response.write('''<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response><d:href>/manga/</d:href><d:propstat><d:prop>
+    <d:resourcetype><d:collection/></d:resourcetype>
+  </d:prop></d:propstat></d:response>
+  <d:response><d:href>/manga/remote.cbz</d:href><d:propstat><d:prop>
+    <d:getcontentlength>${archiveBytes.length}</d:getcontentlength>
+    <d:getetag>"remote-v1"</d:getetag><d:resourcetype/>
+  </d:prop></d:propstat></d:response>
+</d:multistatus>''');
+      } else if (request.method == 'GET' &&
+          request.uri.path == '/manga/remote.cbz') {
+        request.response.headers.contentType = ContentType.binary;
+        request.response.add(archiveBytes);
+      } else {
+        request.response.statusCode = HttpStatus.notFound;
+      }
+      await request.response.close();
+    });
+
+    final network = NetworkRepository(database);
+    final source = await network.createSource(
+      name: '测试 WebDAV',
+      type: NetworkSourceType.webdav,
+      endpoint: 'http://127.0.0.1:${server.port}',
+      rootPath: '/manga',
+      username: '',
+    );
+    final archiveImporter = ArchiveImportService(repository, storage, importer);
+    final service = NetworkLibraryService(
+      network,
+      storage,
+      archiveImporter,
+      MemoryNetworkCredentialStore(),
+    );
+    addTearDown(service.dispose);
+
+    final discovered = await service.discoverAndSave(source);
+    expect(discovered, hasLength(1));
+    expect(discovered.single.title, 'remote');
+    final cached = await service.cacheBook(discovered.single.id);
+    expect(cached.pageCount, 3);
+    final pages = await network.loadPages(cached.id);
+    expect(pages.map((page) => page.originalName), <String>[
+      '1.png',
+      '2.png',
+      '10.png',
+    ]);
+    for (final page in pages) {
+      expect(await File(storage.resolve(page.relativePath)).exists(), isTrue);
+    }
+  });
+
+  test('OPDS 目录可识别漫画获取链接并使用数字自然排序', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(server.close);
+    server.listen((request) async {
+      request.response.headers.contentType = ContentType(
+        'application',
+        'atom+xml',
+        charset: 'utf-8',
+      );
+      request.response.write('''<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Library</title>
+  <entry><title>Volume 10</title><updated>2026-08-29T00:00:00Z</updated>
+    <link rel="http://opds-spec.org/acquisition" type="application/vnd.comicbook+zip" href="/books/10.cbz"/>
+  </entry>
+  <entry><title>Volume 2</title><updated>2026-08-28T00:00:00Z</updated>
+    <link rel="http://opds-spec.org/acquisition" type="application/vnd.comicbook-rar" href="/books/2.cbr"/>
+  </entry>
+</feed>''');
+      await request.response.close();
+    });
+    final network = NetworkRepository(database);
+    final source = await network.createSource(
+      name: '测试 OPDS',
+      type: NetworkSourceType.opds,
+      endpoint: 'http://127.0.0.1:${server.port}',
+      rootPath: '',
+      username: '',
+    );
+    final service = NetworkLibraryService(
+      network,
+      storage,
+      ArchiveImportService(repository, storage, importer),
+      MemoryNetworkCredentialStore(),
+    );
+    addTearDown(service.dispose);
+
+    final books = await service.discoverAndSave(source);
+    expect(books.map((book) => book.title), <String>['Volume 2', 'Volume 10']);
+    expect(books.last.mediaType, 'application/vnd.comicbook+zip');
+  });
+
+  test('跨来源 OPDS 下载不会把书库账号密码发送给第三方主机', () async {
+    final archiveFile = await _createZip(
+      sandbox,
+      'external.cbz',
+      <String, List<int>>{'001.png': _pngBytes(1)},
+    );
+    final archiveBytes = await archiveFile.readAsBytes();
+    String? externalAuthorization;
+    final assetServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(assetServer.close);
+    assetServer.listen((request) async {
+      externalAuthorization = request.headers.value(
+        HttpHeaders.authorizationHeader,
+      );
+      request.response.add(archiveBytes);
+      await request.response.close();
+    });
+
+    final expectedBasic =
+        'Basic ${base64Encode(utf8.encode('reader:private-password'))}';
+    final catalogServer = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    addTearDown(catalogServer.close);
+    catalogServer.listen((request) async {
+      expect(
+        request.headers.value(HttpHeaders.authorizationHeader),
+        expectedBasic,
+      );
+      request.response.headers.contentType = ContentType(
+        'application',
+        'atom+xml',
+        charset: 'utf-8',
+      );
+      request.response.write('''<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Library</title>
+  <entry><title>External</title><updated>2026-08-29T00:00:00Z</updated>
+    <link rel="http://opds-spec.org/acquisition" type="application/vnd.comicbook+zip"
+      href="http://127.0.0.1:${assetServer.port}/external.cbz"/>
+  </entry>
+</feed>''');
+      await request.response.close();
+    });
+
+    final network = NetworkRepository(database);
+    final source = await network.createSource(
+      name: '带认证 OPDS',
+      type: NetworkSourceType.opds,
+      endpoint: 'http://127.0.0.1:${catalogServer.port}',
+      rootPath: '',
+      username: 'reader',
+    );
+    final credentialStore = MemoryNetworkCredentialStore();
+    final service = NetworkLibraryService(
+      network,
+      storage,
+      ArchiveImportService(repository, storage, importer),
+      credentialStore,
+    );
+    addTearDown(service.dispose);
+    await service.saveCredentials(
+      source.id,
+      const NetworkCredentials(
+        username: 'reader',
+        password: 'private-password',
+      ),
+    );
+
+    final books = await service.discoverAndSave(source);
+    await service.cacheBook(books.single.id);
+    expect(externalAuthorization, isNull);
   });
 }
 

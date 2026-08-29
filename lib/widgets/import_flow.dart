@@ -8,6 +8,112 @@ import 'formatters.dart';
 
 enum _ImportSource { gallery, files, archives }
 
+class NewArchiveImportResult {
+  const NewArchiveImportResult(this.comic, this.report);
+
+  final Comic comic;
+  final ImportReport report;
+}
+
+Future<NewArchiveImportResult?> runNewArchiveImportFlow({
+  required BuildContext context,
+  required AppController controller,
+}) async {
+  final files = await controller.pickArchives();
+  if (files.isEmpty || !context.mounted) return null;
+  PreparedArchiveSelection? selection;
+  try {
+    selection = await controller.prepareArchives(files);
+    if (!context.mounted) return null;
+    final preparedSelection = selection;
+    final freeBytes = await controller.freeBytes();
+    if (!context.mounted) return null;
+    final insufficient =
+        freeBytes != null && preparedSelection.decodedBytes > freeBytes;
+    final titleController = TextEditingController(
+      text: preparedSelection.suggestedTitle,
+    );
+    final choice = await showDialog<_NewArchiveChoice>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(insufficient ? '设备空间不足' : '导入为新漫画'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            if (!insufficient)
+              TextField(
+                controller: titleController,
+                maxLength: 80,
+                decoration: const InputDecoration(
+                  labelText: '漫画名称',
+                  counterText: '',
+                ),
+              ),
+            const SizedBox(height: 12),
+            Text(
+              insufficient
+                  ? '解压后约需 ${formatBytes(preparedSelection.decodedBytes)}，当前可用 ${formatBytes(freeBytes)}。'
+                  : '${preparedSelection.archives.length} 个压缩包 · ${preparedSelection.totalPages} 张\n'
+                        '将使用原包队列和页面顺序自动建立书架。',
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          if (!insufficient)
+            TextButton(
+              onPressed: () {
+                final title = titleController.text.trim();
+                if (title.isNotEmpty) {
+                  Navigator.pop(
+                    context,
+                    _NewArchiveChoice(title, DuplicatePolicy.keep),
+                  );
+                }
+              },
+              child: const Text('保留重复'),
+            ),
+          if (!insufficient)
+            FilledButton(
+              onPressed: () {
+                final title = titleController.text.trim();
+                if (title.isNotEmpty) {
+                  Navigator.pop(
+                    context,
+                    _NewArchiveChoice(title, DuplicatePolicy.skip),
+                  );
+                }
+              },
+              child: const Text('开始导入'),
+            ),
+        ],
+      ),
+    );
+    titleController.dispose();
+    if (choice == null || !context.mounted) return null;
+    final comic = await controller.createComic(choice.title);
+    if (!context.mounted) return null;
+    final report = await _importPreparedSelection(
+      context: context,
+      controller: controller,
+      comicId: comic.id,
+      selection: preparedSelection,
+      policy: choice.policy,
+      setCoverFromFirstArchive: true,
+    );
+    return NewArchiveImportResult(comic, report);
+  } catch (error) {
+    if (context.mounted) await _showArchiveError(context, error);
+    return null;
+  } finally {
+    await selection?.dispose();
+  }
+}
+
 Future<ImportReport?> runImportFlow({
   required BuildContext context,
   required AppController controller,
@@ -217,54 +323,80 @@ Future<ImportReport?> _runArchiveImportFlow({
     );
     if (policy == null || !context.mounted) return null;
 
-    var pending = preparedSelection;
-    var imported = 0;
-    var skipped = 0;
-    while (true) {
-      final report = await controller.importArchives(
-        comicId: comicId,
-        selection: pending,
-        duplicatePolicy: policy,
-        setCoverFromFirstArchive:
-            setCoverFromFirstArchive && pending.archives.first.sourceIndex == 0,
-      );
-      imported += report.imported;
-      skipped += report.skippedDuplicates;
-      final aggregate = ImportReport(
-        imported: imported,
-        skippedDuplicates: skipped,
-        failures: report.failures,
-      );
-      if (!context.mounted) return aggregate;
-      final retry = await _showArchiveResult(context, aggregate);
-      if (retry != true || report.failures.isEmpty) return aggregate;
-      final failedSourceIndex = report.failures.first.sourceIndex;
-      pending = PreparedArchiveSelection(
-        preparedSelection.archives
-            .where((item) => item.sourceIndex >= failedSourceIndex)
-            .toList(growable: false),
-      );
-    }
+    return _importPreparedSelection(
+      context: context,
+      controller: controller,
+      comicId: comicId,
+      selection: preparedSelection,
+      policy: policy,
+      setCoverFromFirstArchive: setCoverFromFirstArchive,
+    );
   } catch (error) {
-    if (context.mounted) {
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('无法导入压缩包'),
-          content: Text(error.toString().replaceFirst('FormatException: ', '')),
-          actions: <Widget>[
-            FilledButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('知道了'),
-            ),
-          ],
-        ),
-      );
-    }
+    if (context.mounted) await _showArchiveError(context, error);
     return null;
   } finally {
     await selection?.dispose();
   }
+}
+
+Future<ImportReport> _importPreparedSelection({
+  required BuildContext context,
+  required AppController controller,
+  required String comicId,
+  required PreparedArchiveSelection selection,
+  required DuplicatePolicy policy,
+  required bool setCoverFromFirstArchive,
+}) async {
+  var pending = selection;
+  var imported = 0;
+  var skipped = 0;
+  while (true) {
+    final report = await controller.importArchives(
+      comicId: comicId,
+      selection: pending,
+      duplicatePolicy: policy,
+      setCoverFromFirstArchive:
+          setCoverFromFirstArchive && pending.archives.first.sourceIndex == 0,
+    );
+    imported += report.imported;
+    skipped += report.skippedDuplicates;
+    final aggregate = ImportReport(
+      imported: imported,
+      skippedDuplicates: skipped,
+      failures: report.failures,
+    );
+    if (!context.mounted) return aggregate;
+    final retry = await _showArchiveResult(context, aggregate);
+    if (retry != true || report.failures.isEmpty) return aggregate;
+    final failedSourceIndex = report.failures.first.sourceIndex;
+    pending = PreparedArchiveSelection(
+      selection.archives
+          .where((item) => item.sourceIndex >= failedSourceIndex)
+          .toList(growable: false),
+    );
+  }
+}
+
+Future<void> _showArchiveError(BuildContext context, Object error) =>
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('无法导入压缩包'),
+        content: Text(error.toString().replaceFirst('FormatException: ', '')),
+        actions: <Widget>[
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+
+class _NewArchiveChoice {
+  const _NewArchiveChoice(this.title, this.policy);
+
+  final String title;
+  final DuplicatePolicy policy;
 }
 
 Future<bool?> _showArchiveResult(BuildContext context, ImportReport report) {

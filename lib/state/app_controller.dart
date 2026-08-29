@@ -4,10 +4,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 
 import '../data/library_repository.dart';
+import '../data/network_repository.dart';
 import '../models/entities.dart';
 import '../services/backup_service.dart';
 import '../services/archive_import_service.dart';
 import '../services/import_service.dart';
+import '../services/network_library_service.dart';
 import '../services/storage_service.dart';
 
 class OperationProgress {
@@ -33,27 +35,213 @@ class AppController extends ChangeNotifier {
     this._importer,
     this._archiveImporter,
     this._backup,
+    this._networkRepository,
+    this._networkLibrary,
   );
 
   final LibraryRepository _repository;
   final ImportService _importer;
   final ArchiveImportService _archiveImporter;
   final BackupService _backup;
+  final NetworkRepository _networkRepository;
+  final NetworkLibraryService _networkLibrary;
   final StorageService storage;
 
   List<ComicSummary> library = const <ComicSummary>[];
+  List<NetworkSource> networkSources = const <NetworkSource>[];
+  Map<String, List<RemoteBook>> networkBooks =
+      const <String, List<RemoteBook>>{};
   ReaderPreferences preferences = const ReaderPreferences();
   OperationProgress? operation;
 
   Future<void> initialize() async {
     preferences = await _repository.loadPreferences();
     library = await _repository.loadLibrary();
+    await refreshNetworkLibrary(notify: false);
   }
 
   Future<void> refresh() async {
     library = await _repository.loadLibrary();
     notifyListeners();
   }
+
+  Future<void> refreshNetworkLibrary({bool notify = true}) async {
+    networkSources = await _networkRepository.loadSources();
+    final books = <String, List<RemoteBook>>{};
+    for (final source in networkSources) {
+      books[source.id] = await _networkRepository.loadBooks(source.id);
+    }
+    networkBooks = books;
+    if (notify) notifyListeners();
+  }
+
+  List<RemoteBook> booksForSource(String sourceId) =>
+      networkBooks[sourceId] ?? const <RemoteBook>[];
+
+  RemoteBook? remoteBookFor(String bookId) {
+    for (final books in networkBooks.values) {
+      for (final book in books) {
+        if (book.id == bookId) return book;
+      }
+    }
+    return null;
+  }
+
+  Future<NetworkSource> addNetworkSource({
+    required String name,
+    required NetworkSourceType type,
+    required String endpoint,
+    required String rootPath,
+    required NetworkCredentials credentials,
+  }) async {
+    final now = DateTime.now().toUtc();
+    final probe = NetworkSource(
+      id: 'connection-probe',
+      name: name,
+      type: type,
+      endpoint: endpoint,
+      rootPath: rootPath,
+      username: credentials.username,
+      createdAt: now,
+      updatedAt: now,
+    );
+    operation = const OperationProgress(
+      title: '正在连接网络书库',
+      completed: 0,
+      total: 0,
+      detail: '校验地址与账号',
+    );
+    notifyListeners();
+    try {
+      await _networkLibrary.testConnection(probe, credentials);
+      final source = await _networkRepository.createSource(
+        name: name,
+        type: type,
+        endpoint: endpoint,
+        rootPath: rootPath,
+        username: credentials.username,
+      );
+      await _networkLibrary.saveCredentials(source.id, credentials);
+      try {
+        await _networkLibrary.discoverAndSave(source);
+      } catch (_) {
+        // The mount remains saved if the first full scan fails; the user can
+        // retry without re-entering credentials.
+      }
+      await refreshNetworkLibrary(notify: false);
+      return source;
+    } finally {
+      operation = null;
+      notifyListeners();
+    }
+  }
+
+  Future<void> scanNetworkSource(NetworkSource source) async {
+    operation = const OperationProgress(
+      title: '正在同步网络书库',
+      completed: 0,
+      total: 0,
+      detail: '只读扫描远程目录',
+    );
+    notifyListeners();
+    try {
+      await _networkLibrary.discoverAndSave(source);
+      await refreshNetworkLibrary(notify: false);
+    } finally {
+      operation = null;
+      notifyListeners();
+    }
+  }
+
+  Future<void> reauthenticateNetworkSource(
+    NetworkSource source,
+    NetworkCredentials credentials,
+  ) async {
+    operation = const OperationProgress(
+      title: '正在验证新凭据',
+      completed: 0,
+      total: 0,
+      detail: '凭据只保存在系统安全存储',
+    );
+    notifyListeners();
+    try {
+      final updated = NetworkSource(
+        id: source.id,
+        name: source.name,
+        type: source.type,
+        endpoint: source.endpoint,
+        rootPath: source.rootPath,
+        username: credentials.username,
+        createdAt: source.createdAt,
+        updatedAt: DateTime.now().toUtc(),
+      );
+      await _networkLibrary.testConnection(updated, credentials);
+      await _networkRepository.updateSource(updated);
+      await _networkLibrary.saveCredentials(source.id, credentials);
+      await _networkLibrary.discoverAndSave(updated);
+      await refreshNetworkLibrary(notify: false);
+    } finally {
+      operation = null;
+      notifyListeners();
+    }
+  }
+
+  Future<List<RemotePage>> prepareRemoteBook(String bookId) async {
+    operation = const OperationProgress(
+      title: '正在准备网络漫画',
+      completed: 0,
+      total: 0,
+      detail: '按需读取，原程保持只读',
+    );
+    notifyListeners();
+    try {
+      await _networkLibrary.cacheBook(
+        bookId,
+        onProgress: (completed, total, detail) {
+          operation = OperationProgress(
+            title: '正在准备网络漫画',
+            completed: completed,
+            total: total,
+            detail: detail,
+          );
+          notifyListeners();
+        },
+      );
+      await refreshNetworkLibrary(notify: false);
+      return _networkRepository.loadPages(bookId);
+    } finally {
+      operation = null;
+      notifyListeners();
+    }
+  }
+
+  Future<List<RemotePage>> loadRemotePages(String bookId) =>
+      _networkRepository.loadPages(bookId);
+
+  Future<void> saveRemoteProgress(
+    String bookId,
+    int position,
+    double offset,
+  ) async {
+    if (!preferences.rememberProgress) return;
+    await _networkRepository.saveProgress(bookId, position, offset);
+    final current = remoteBookFor(bookId);
+    if (current != null) {
+      await refreshNetworkLibrary();
+    }
+  }
+
+  Future<void> clearRemoteBookCache(String bookId) async {
+    await _networkLibrary.clearBookCache(bookId);
+    await refreshNetworkLibrary();
+  }
+
+  Future<void> removeNetworkSource(String sourceId) async {
+    await _networkLibrary.removeSource(sourceId);
+    await refreshNetworkLibrary();
+  }
+
+  Future<int> networkCacheBytes() => storage.networkCacheBytes();
 
   ComicSummary? summaryFor(String comicId) {
     for (final summary in library) {

@@ -8,7 +8,10 @@ import '../widgets/import_flow.dart';
 import '../widgets/private_image.dart';
 import 'comic_detail_screen.dart';
 import 'editor_screen.dart';
+import 'network_sources_screen.dart';
 import 'settings_screen.dart';
+
+enum _NewComicSource { archives, images }
 
 class LibraryScreen extends StatelessWidget {
   const LibraryScreen({required this.controller, super.key});
@@ -38,6 +41,15 @@ class LibraryScreen extends StatelessWidget {
           ),
           actions: <Widget>[
             IconButton(
+              tooltip: '网络书库',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => NetworkSourcesScreen(controller: controller),
+                ),
+              ),
+              icon: const Icon(Icons.cloud_outlined),
+            ),
+            IconButton(
               tooltip: '设置',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(
@@ -62,6 +74,51 @@ class LibraryScreen extends StatelessWidget {
   }
 
   Future<void> _createComic(BuildContext context) async {
+    final source = await showModalBottomSheet<_NewComicSource>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              ListTile(
+                leading: const Icon(Icons.folder_zip_outlined),
+                title: const Text('导入漫画压缩包'),
+                subtitle: const Text('自动识别名称、封面与原顺序'),
+                onTap: () => Navigator.pop(context, _NewComicSource.archives),
+              ),
+              ListTile(
+                leading: const Icon(Icons.add_photo_alternate_outlined),
+                title: const Text('新建图片漫画'),
+                subtitle: const Text('从相册或文件选择原图'),
+                onTap: () => Navigator.pop(context, _NewComicSource.images),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (source == null || !context.mounted) return;
+    if (source == _NewComicSource.archives) {
+      final result = await runNewArchiveImportFlow(
+        context: context,
+        controller: controller,
+      );
+      if (result == null || !context.mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => result.report.imported > 0
+              ? EditorScreen(controller: controller, comicId: result.comic.id)
+              : ComicDetailScreen(
+                  controller: controller,
+                  comicId: result.comic.id,
+                ),
+        ),
+      );
+      return;
+    }
     final textController = TextEditingController();
     final title = await showDialog<String>(
       context: context,

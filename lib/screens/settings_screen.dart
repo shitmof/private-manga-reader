@@ -4,6 +4,7 @@ import '../models/entities.dart';
 import '../state/app_controller.dart';
 import '../theme.dart';
 import '../widgets/formatters.dart';
+import 'network_sources_screen.dart';
 import 'trash_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -98,6 +99,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       preferences.copyWith(theme: selection.first),
                     ),
               ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          const _SectionLabel('网络书库'),
+          Card(
+            margin: EdgeInsets.zero,
+            child: Column(
+              children: <Widget>[
+                ListTile(
+                  leading: const Icon(Icons.cloud_outlined),
+                  title: const Text('网络书库'),
+                  subtitle: Text(
+                    controllerLabel(widget.controller.networkSources.length),
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          NetworkSourcesScreen(controller: widget.controller),
+                    ),
+                  ),
+                ),
+                const Divider(height: 1, indent: 56),
+                FutureBuilder<int>(
+                  future: widget.controller.networkCacheBytes(),
+                  builder: (context, snapshot) => ListTile(
+                    leading: const Icon(Icons.offline_pin_outlined),
+                    title: const Text('网络阅读缓存'),
+                    subtitle: const Text('清缓存不会清除本地阅读记录'),
+                    trailing: Text(
+                      snapshot.hasData ? formatBytes(snapshot.data!) : '计算中',
+                      style: const TextStyle(color: ShelfColors.muted),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 24),
@@ -205,13 +242,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: ListTile(
               leading: Icon(Icons.lock_outline_rounded),
               title: Text('完全本地'),
-              subtitle: Text('没有账号、社交、广告或云同步。导入只复制到 App 私有目录，不写回系统相册。'),
+              subtitle: Text('不建立 App 账号，没有社交、广告或云同步。网络书库始终只读，阅读记录只留在本机。'),
             ),
           ),
           const SizedBox(height: 24),
           const Center(
             child: Text(
-              '私人书架 1.0.0',
+              '私人书架 1.1.0',
               style: TextStyle(color: ShelfColors.muted, fontSize: 12),
             ),
           ),
@@ -331,6 +368,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 }
+
+String controllerLabel(int count) =>
+    count == 0 ? 'WebDAV、OPDS 与 SMB/NAS' : '已挂载 $count 个远程书库';
 
 class _SectionLabel extends StatelessWidget {
   const _SectionLabel(this.text);
