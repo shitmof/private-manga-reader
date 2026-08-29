@@ -1,5 +1,5 @@
 name: private_manga_reader
-description: "A new Flutter project."
+description: "完全本地、私有、无损的手机漫画与插画阅读器。"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -34,6 +34,17 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  sqflite: ^2.4.3
+  path_provider: ^2.1.6
+  path: ^1.9.1
+  file_picker: ^12.1.2
+  crypto: ^3.0.7
+  archive: ^4.2.0
+  image: ^4.9.2
+  share_plus: ^13.3.0
+  uuid: ^4.6.0
+  cross_file: ^0.3.5+5
+  mime: ^2.1.0
 
 dev_dependencies:
   flutter_test:
@@ -45,6 +56,8 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  sqflite_common_ffi: ^2.4.2+1
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -56,6 +69,16 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/branding/app_icon.png
+  adaptive_icon_background: "#F7F8FA"
+  adaptive_icon_foreground: assets/branding/app_icon.png
+  adaptive_icon_foreground_inset: 14
+  remove_alpha_ios: true
+  background_color_ios: "#F7F8FA"
 
   # To add assets to your application, add an assets section, like this:
   # assets:

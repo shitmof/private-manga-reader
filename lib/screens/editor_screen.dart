@@ -1,0 +1,420 @@
+import 'package:flutter/material.dart';
+
+import '../models/entities.dart';
+import '../state/app_controller.dart';
+import '../theme.dart';
+import '../widgets/import_flow.dart';
+import '../widgets/private_image.dart';
+
+class EditorScreen extends StatefulWidget {
+  const EditorScreen({
+    required this.controller,
+    required this.comicId,
+    super.key,
+  });
+
+  final AppController controller;
+  final String comicId;
+
+  @override
+  State<EditorScreen> createState() => _EditorScreenState();
+}
+
+class _EditorScreenState extends State<EditorScreen> {
+  List<ComicItemRecord> _items = <ComicItemRecord>[];
+  final Set<String> _removedIds = <String>{};
+  final Set<String> _addedIds = <String>{};
+  List<String> _originalIds = <String>[];
+  String? _originalCoverAssetId;
+  String? _coverAssetId;
+  String? _selectedItemId;
+  bool _loading = true;
+  bool _saving = false;
+  bool _allowPop = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load({bool initial = true}) async {
+    final items = await widget.controller.loadItems(widget.comicId);
+    if (!mounted) return;
+    setState(() {
+      _items = items;
+      if (initial) {
+        _originalIds = items.map((item) => item.id).toList(growable: false);
+        _originalCoverAssetId =
+            widget.controller.summaryFor(widget.comicId)?.comic.coverAssetId;
+        _coverAssetId = _originalCoverAssetId;
+      }
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = widget.controller.summaryFor(widget.comicId)?.comic.title ?? '编辑';
+    return PopScope(
+      canPop: _allowPop,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && !_allowPop) _cancel();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leadingWidth: 72,
+          leading: TextButton(onPressed: _saving ? null : _cancel, child: const Text('取消')),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text(
+                '${_items.length} / 1000 张',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: ShelfColors.muted,
+                ),
+              ),
+            ],
+          ),
+          centerTitle: true,
+          actions: <Widget>[
+            TextButton(
+              onPressed: _saving ? null : _save,
+              child: _saving
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('保存'),
+            ),
+            const SizedBox(width: 4),
+          ],
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _items.isEmpty
+                ? Center(
+                    child: FilledButton.icon(
+                      onPressed: _addImages,
+                      icon: const Icon(Icons.add_photo_alternate_outlined),
+                      label: const Text('添加图片'),
+                    ),
+                  )
+                : GridView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 108),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3,
+                      crossAxisSpacing: 8,
+                      mainAxisSpacing: 8,
+                      childAspectRatio: 0.72,
+                    ),
+                    itemCount: _items.length,
+                    itemBuilder: (context, index) => _buildDraggableItem(index),
+                  ),
+        bottomNavigationBar: _EditorToolbar(
+          hasSelection: _selectedItemId != null,
+          canAdd: _items.length < 1000,
+          onAscending: _sortAscending,
+          onDescending: _reverse,
+          onAdd: _addImages,
+          onDelete: _deleteSelected,
+          onCover: _setSelectedAsCover,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDraggableItem(int index) {
+    final item = _items[index];
+    final selected = item.id == _selectedItemId;
+    final isCover = item.asset.id == _coverAssetId ||
+        (_coverAssetId == null && index == 0);
+    return DragTarget<int>(
+      onWillAcceptWithDetails: (details) => details.data != index,
+      onAcceptWithDetails: (details) {
+        setState(() {
+          final moving = _items.removeAt(details.data);
+          _items.insert(index, moving);
+        });
+      },
+      builder: (context, candidates, rejected) => LongPressDraggable<int>(
+        data: index,
+        feedback: SizedBox(
+          width: 112,
+          height: 156,
+          child: Material(
+            elevation: 8,
+            borderRadius: BorderRadius.circular(14),
+            child: _ImageTile(
+              controller: widget.controller,
+              item: item,
+              index: index,
+              selected: true,
+              isCover: isCover,
+            ),
+          ),
+        ),
+        childWhenDragging: Opacity(
+          opacity: 0.25,
+          child: _ImageTile(
+            controller: widget.controller,
+            item: item,
+            index: index,
+            selected: selected,
+            isCover: isCover,
+          ),
+        ),
+        child: GestureDetector(
+          onTap: () => setState(() {
+            _selectedItemId = selected ? null : item.id;
+          }),
+          child: AnimatedScale(
+            scale: candidates.isEmpty ? 1 : 0.94,
+            duration: const Duration(milliseconds: 120),
+            child: _ImageTile(
+              controller: widget.controller,
+              item: item,
+              index: index,
+              selected: selected,
+              isCover: isCover,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _sortAscending() {
+    setState(() {
+      _items.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    });
+  }
+
+  void _reverse() => setState(() => _items = _items.reversed.toList());
+
+  Future<void> _addImages() async {
+    final before = _items.map((item) => item.id).toSet();
+    final report = await runImportFlow(
+      context: context,
+      controller: widget.controller,
+      comicId: widget.comicId,
+    );
+    if (report == null || !mounted) return;
+    final items = await widget.controller.loadItems(widget.comicId);
+    if (!mounted) return;
+    setState(() {
+      for (final item in items) {
+        if (!before.contains(item.id)) _addedIds.add(item.id);
+      }
+      _items = items;
+    });
+  }
+
+  void _deleteSelected() {
+    final id = _selectedItemId;
+    if (id == null) return;
+    setState(() {
+      final selected = _items.firstWhere((item) => item.id == id);
+      _items.removeWhere((item) => item.id == id);
+      _removedIds.add(id);
+      if (selected.asset.id == _coverAssetId) _coverAssetId = null;
+      _selectedItemId = null;
+    });
+  }
+
+  void _setSelectedAsCover() {
+    final id = _selectedItemId;
+    if (id == null) return;
+    final item = _items.firstWhere((item) => item.id == id);
+    setState(() => _coverAssetId = item.asset.id);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已选择新封面，保存后生效')),
+    );
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await widget.controller.applyItemEdits(
+        comicId: widget.comicId,
+        orderedItemIds: _items.map((item) => item.id).toList(growable: false),
+        removedItemIds: _removedIds.toList(growable: false),
+        coverAssetId: _coverAssetId,
+      );
+      if (mounted) {
+        setState(() => _allowPop = true);
+        Navigator.pop(context);
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _cancel() async {
+    if (_addedIds.isNotEmpty) {
+      await widget.controller.applyItemEdits(
+        comicId: widget.comicId,
+        orderedItemIds: _originalIds,
+        removedItemIds: _addedIds.toList(growable: false),
+        coverAssetId: _originalCoverAssetId,
+      );
+    }
+    if (mounted) {
+      setState(() => _allowPop = true);
+      Navigator.pop(context);
+    }
+  }
+}
+
+class _ImageTile extends StatelessWidget {
+  const _ImageTile({
+    required this.controller,
+    required this.item,
+    required this.index,
+    required this.selected,
+    required this.isCover,
+  });
+
+  final AppController controller;
+  final ComicItemRecord item;
+  final int index;
+  final bool selected;
+  final bool isCover;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 140),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: selected ? ShelfColors.blue : Colors.transparent,
+          width: selected ? 3 : 0,
+        ),
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          PrivateImage(
+            controller: controller,
+            originalPath: item.asset.storedPath,
+            thumbnailPath: item.asset.thumbnailPath,
+            cacheWidth: 300,
+            borderRadius: BorderRadius.circular(selected ? 10 : 14),
+          ),
+          Positioned(
+            left: 6,
+            top: 6,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xCC111418),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Text(
+                '${index + 1}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+          if (isCover)
+            const Positioned(
+              right: 7,
+              top: 7,
+              child: CircleAvatar(
+                radius: 12,
+                backgroundColor: ShelfColors.blue,
+                child: Icon(Icons.bookmark_rounded, size: 14, color: Colors.white),
+              ),
+            ),
+          if (selected)
+            const Positioned(
+              right: 7,
+              bottom: 7,
+              child: CircleAvatar(
+                radius: 12,
+                backgroundColor: ShelfColors.blue,
+                child: Icon(Icons.check_rounded, size: 15, color: Colors.white),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EditorToolbar extends StatelessWidget {
+  const _EditorToolbar({
+    required this.hasSelection,
+    required this.canAdd,
+    required this.onAscending,
+    required this.onDescending,
+    required this.onAdd,
+    required this.onDelete,
+    required this.onCover,
+  });
+
+  final bool hasSelection;
+  final bool canAdd;
+  final VoidCallback onAscending;
+  final VoidCallback onDescending;
+  final VoidCallback onAdd;
+  final VoidCallback onDelete;
+  final VoidCallback onCover;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 72,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: <Widget>[
+              _Tool(icon: Icons.arrow_upward_rounded, label: '正序', onTap: onAscending),
+              _Tool(icon: Icons.swap_vert_rounded, label: '倒序', onTap: onDescending),
+              _Tool(icon: Icons.add_rounded, label: '添加', onTap: canAdd ? onAdd : null),
+              _Tool(icon: Icons.delete_outline_rounded, label: '删除', onTap: hasSelection ? onDelete : null),
+              _Tool(icon: Icons.bookmark_outline_rounded, label: '封面', onTap: hasSelection ? onCover : null),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Tool extends StatelessWidget {
+  const _Tool({required this.icon, required this.label, required this.onTap});
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkResponse(
+      onTap: onTap,
+      radius: 30,
+      child: SizedBox(
+        width: 58,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Icon(icon, size: 22, color: onTap == null ? Colors.grey : null),
+            const SizedBox(height: 3),
+            Text(label, style: Theme.of(context).textTheme.labelSmall),
+          ],
+        ),
+      ),
+    );
+  }
+}
