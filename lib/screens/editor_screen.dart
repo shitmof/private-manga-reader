@@ -42,7 +42,7 @@ class _EditorScreenState extends State<EditorScreen> {
     final items = await widget.controller.loadItems(widget.comicId);
     if (!mounted) return;
     setState(() {
-      _items = items;
+      _items = List<ComicItemRecord>.of(items);
       if (initial) {
         _originalIds = items.map((item) => item.id).toList(growable: false);
         _originalCoverAssetId = widget.controller
@@ -76,11 +76,15 @@ class _EditorScreenState extends State<EditorScreen> {
             children: <Widget>[
               Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
               Text(
-                '${_items.length} / 1000 张',
-                style: const TextStyle(
+                _selectedItemIds.isEmpty
+                    ? '${_items.length} / 1000 张'
+                    : '已选择 ${_selectedItemIds.length} 张',
+                style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
-                  color: ShelfColors.muted,
+                  color: _selectedItemIds.isEmpty
+                      ? ShelfColors.muted
+                      : ShelfColors.blue,
                 ),
               ),
             ],
@@ -173,23 +177,31 @@ class _EditorScreenState extends State<EditorScreen> {
             isCover: isCover,
           ),
         ),
-        child: GestureDetector(
-          onTap: () => setState(() {
-            if (selected) {
-              _selectedItemIds.remove(item.id);
-            } else {
-              _selectedItemIds.add(item.id);
-            }
-          }),
-          child: AnimatedScale(
-            scale: candidates.isEmpty ? 1 : 0.94,
-            duration: const Duration(milliseconds: 120),
-            child: _ImageTile(
-              controller: widget.controller,
-              item: item,
-              index: index,
-              selected: selected,
-              isCover: isCover,
+        child: Semantics(
+          container: true,
+          button: true,
+          selected: selected,
+          label: '第 ${index + 1} 张，${selected ? '已选择，点按取消选择' : '未选择，点按选择'}',
+          excludeSemantics: true,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setState(() {
+              if (selected) {
+                _selectedItemIds.remove(item.id);
+              } else {
+                _selectedItemIds.add(item.id);
+              }
+            }),
+            child: AnimatedScale(
+              scale: candidates.isEmpty ? 1 : 0.94,
+              duration: const Duration(milliseconds: 120),
+              child: _ImageTile(
+                controller: widget.controller,
+                item: item,
+                index: index,
+                selected: selected,
+                isCover: isCover,
+              ),
             ),
           ),
         ),
@@ -219,12 +231,32 @@ class _EditorScreenState extends State<EditorScreen> {
       for (final item in items) {
         if (!before.contains(item.id)) _addedIds.add(item.id);
       }
-      _items = items;
+      _items = List<ComicItemRecord>.of(items);
     });
   }
 
-  void _deleteSelected() {
+  Future<void> _deleteSelected() async {
     if (_selectedItemIds.isEmpty) return;
+    final count = _selectedItemIds.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('删除选中的 $count 张图片？'),
+        content: const Text('保存后将从这本漫画中移除。其他漫画引用的原图不会受影响。'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
     setState(() {
       final removed = _items
           .where((item) => _selectedItemIds.contains(item.id))
