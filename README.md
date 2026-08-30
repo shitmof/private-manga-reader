@@ -51,8 +51,7 @@ App Documents/private_shelf/
 ├── thumbnails/      # 可清理、可重建的缩略图
 ├── backup-temp/     # 导入、备份和恢复临时文件
 ├── backups/         # App 内最近创建的完整备份
-├── network-cache/   # 可清理的只读网络漫画页面缓存
-└── external-cache/  # 可清理的 SAF 挂载页缓存；原文件仍在用户选择的目录
+└── network-cache/   # 可清理的只读网络漫画页面缓存
 
 Application Support/
 ├── library.db       # 漫画、书源索引、引用顺序、封面、进度和设置
@@ -60,6 +59,8 @@ Application Support/
 ```
 
 SQLite 只保存相对路径。备份恢复到另一台设备时不会依赖旧设备绝对路径。
+
+SAF 原地挂载只在数据库保存可重建索引；原文件仍位于用户选择的目录。阅读页解码结果只进入受 120 项/96 MiB 上限约束的内存图片缓存，不创建第二份永久原图。
 
 ## 开发与验证
 
