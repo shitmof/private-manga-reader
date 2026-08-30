@@ -176,9 +176,24 @@ void main() {
       3,
     );
     expect(find.text('待看漫画'), findsOneWidget);
+    for (var index = 0; index < 4; index++) {
+      expect(
+        find.byKey(ValueKey<String>('folder-mosaic-slot-$index')),
+        findsOneWidget,
+      );
+    }
 
-    await tester.tap(find.byTooltip('更多'));
+    await tester.tap(find.byTooltip('整理书架'));
     await tester.pumpAndSettle();
+    expect(find.text('整理书架'), findsOneWidget);
+    expect(find.text('完成'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate((widget) => widget is LongPressDraggable),
+      findsNWidgets(3),
+    );
+    await tester.tap(find.text('完成'));
+    await tester.pumpAndSettle();
+
     await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
     expect(find.byType(Slider), findsNothing);

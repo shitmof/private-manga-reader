@@ -253,6 +253,38 @@ void main() {
     expect(ungrouped!.comic.folderId, isNull);
   });
 
+  test('主书架的漫画与分组可混合排序并持久保存', () async {
+    final first = await repository.createComic('第一本');
+    final second = await repository.createComic('第二本');
+    final folder = await repository.createFolder('四宫格分组');
+
+    final initial = await repository.loadShelfEntries();
+    expect(initial.map((entry) => entry.key), <String>[
+      'folder:${folder.id}',
+      'comic:${first.id}',
+      'comic:${second.id}',
+    ]);
+
+    await repository.reorderShelfEntries('root', <String>[
+      'comic:${second.id}',
+      'folder:${folder.id}',
+      'comic:${first.id}',
+    ]);
+    final reordered = await repository.loadShelfEntries();
+    expect(reordered.map((entry) => entry.key), <String>[
+      'comic:${second.id}',
+      'folder:${folder.id}',
+      'comic:${first.id}',
+    ]);
+
+    await repository.moveComicsToFolder(<String>[second.id], folder.id);
+    final repaired = await repository.loadShelfEntries();
+    expect(repaired.map((entry) => entry.key), <String>[
+      'folder:${folder.id}',
+      'comic:${first.id}',
+    ]);
+  });
+
   test('私密文件夹可整体锁定，删除分组后内容仍保持私密', () async {
     final comic = await repository.createComic('私密文件夹内容');
     final folder = await repository.createFolder('私密文件夹');
@@ -430,6 +462,9 @@ void main() {
     final remoteBook = (await network.loadBooks(networkSource.id)).single;
     await network.saveProgress(remoteBook.id, 8, 6.5);
     final backupService = BackupService(repository, storage);
+    final manifest = await repository.exportManifest();
+    expect(manifest['version'], 4);
+    expect(manifest['shelfEntries'], isA<List<Object?>>());
     final backup = await backupService.createBackup();
 
     await repository.renameComic(comic.id, '被修改');
@@ -459,6 +494,10 @@ void main() {
     final restoredFolder = (await repository.loadFolders()).single;
     expect(restoredFolder.name, '备份文件夹');
     expect(restoredFolder.isPrivate, isTrue);
+    expect(
+      (await repository.loadShelfEntries()).single.key,
+      'folder:${folder.id}',
+    );
     expect((await repository.loadBookmarks(comic.id)).single.note, '备份书签');
     expect((await repository.loadReadingLists()).single.name, '备份书单');
     expect(await repository.loadReadingListComicIds(readingList.id), <String>[

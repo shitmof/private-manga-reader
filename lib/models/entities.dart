@@ -2,6 +2,31 @@ enum AppThemePreference { system, light, dark }
 
 enum ReadingStatus { unread, reading, completed, paused }
 
+enum ShelfEntryKind { folder, comic }
+
+class ShelfEntry {
+  const ShelfEntry({
+    required this.kind,
+    required this.entityId,
+    required this.scope,
+    required this.sortIndex,
+  });
+
+  final ShelfEntryKind kind;
+  final String entityId;
+  final String scope;
+  final int sortIndex;
+
+  String get key => '${kind.name}:$entityId';
+
+  factory ShelfEntry.fromMap(Map<String, Object?> map) => ShelfEntry(
+    kind: ShelfEntryKind.values.byName(map['entity_type']! as String),
+    entityId: map['entity_id']! as String,
+    scope: map['scope']! as String,
+    sortIndex: map['sort_index']! as int,
+  );
+}
+
 class Comic {
   const Comic({
     required this.id,

@@ -57,6 +57,7 @@ class AppController extends ChangeNotifier {
 
   List<ComicSummary> library = const <ComicSummary>[];
   List<ShelfFolder> folders = const <ShelfFolder>[];
+  List<ShelfEntry> shelfEntries = const <ShelfEntry>[];
   List<ReadingList> readingLists = const <ReadingList>[];
   List<NetworkSource> networkSources = const <NetworkSource>[];
   Map<String, List<RemoteBook>> networkBooks =
@@ -87,6 +88,7 @@ class AppController extends ChangeNotifier {
   Future<void> _refreshLocalLibrary() async {
     library = await _repository.loadLibrary();
     folders = await _repository.loadFolders();
+    shelfEntries = await _repository.loadShelfEntries();
     readingLists = await _repository.loadReadingLists();
   }
 
@@ -567,6 +569,14 @@ class AppController extends ChangeNotifier {
     final item = ids.removeAt(from);
     ids.insert(to, item);
     await _repository.reorderComics(ids);
+    await refresh();
+  }
+
+  Future<void> reorderShelfEntries(
+    String scope,
+    List<String> orderedKeys,
+  ) async {
+    await _repository.reorderShelfEntries(scope, orderedKeys);
     await refresh();
   }
 

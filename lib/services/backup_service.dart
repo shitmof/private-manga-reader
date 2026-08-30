@@ -129,7 +129,8 @@ class BackupService {
       if (manifest['format'] != 'private-manga-reader-backup' ||
           (manifest['version'] != 1 &&
               manifest['version'] != 2 &&
-              manifest['version'] != 3)) {
+              manifest['version'] != 3 &&
+              manifest['version'] != 4)) {
         throw const FormatException('不支持的备份版本');
       }
       final assets = _assetRows(manifest['assets']);

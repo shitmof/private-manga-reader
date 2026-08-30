@@ -100,6 +100,135 @@ class LibraryRepository {
     return rows.map(ShelfFolder.fromMap).toList(growable: false);
   }
 
+  Future<List<ShelfEntry>> loadShelfEntries() async {
+    final db = await _database.instance;
+    await db.transaction(_repairShelfEntries);
+    final rows = await db.query(
+      'shelf_entries',
+      orderBy: 'scope, sort_index, created_at',
+    );
+    return rows.map(ShelfEntry.fromMap).toList(growable: false);
+  }
+
+  Future<void> _repairShelfEntries(Transaction txn) async {
+    final folders = await txn.query(
+      'shelf_folders',
+      columns: <String>['id', 'is_private'],
+      orderBy: 'sort_index, created_at',
+    );
+    final comics = await txn.query(
+      'comics',
+      columns: <String>['id', 'is_private'],
+      where: 'folder_id IS NULL AND deleted_at IS NULL',
+      orderBy: 'sort_index, created_at',
+    );
+    final desired = <String, Map<String, Object?>>{};
+    for (final row in folders) {
+      final id = row['id']! as String;
+      desired['folder:$id'] = <String, Object?>{
+        'entity_type': 'folder',
+        'entity_id': id,
+        'scope': ((row['is_private'] as int?) ?? 0) == 1 ? 'private' : 'root',
+      };
+    }
+    for (final row in comics) {
+      final id = row['id']! as String;
+      desired['comic:$id'] = <String, Object?>{
+        'entity_type': 'comic',
+        'entity_id': id,
+        'scope': ((row['is_private'] as int?) ?? 0) == 1 ? 'private' : 'root',
+      };
+    }
+
+    final existing = await txn.query('shelf_entries');
+    final existingByKey = <String, Map<String, Object?>>{
+      for (final row in existing)
+        '${row['entity_type']}:${row['entity_id']}': row,
+    };
+    for (final entry in existingByKey.entries) {
+      if (!desired.containsKey(entry.key)) {
+        await txn.delete(
+          'shelf_entries',
+          where: 'entity_type = ? AND entity_id = ?',
+          whereArgs: <Object?>[
+            entry.value['entity_type'],
+            entry.value['entity_id'],
+          ],
+        );
+      }
+    }
+
+    final nextByScope = <String, int>{'root': 0, 'private': 0};
+    final maxima = await txn.rawQuery(
+      'SELECT scope, COALESCE(MAX(sort_index), -1) + 1 AS next_index '
+      'FROM shelf_entries GROUP BY scope',
+    );
+    for (final row in maxima) {
+      nextByScope[row['scope']! as String] = row['next_index']! as int;
+    }
+    final now = DateTime.now().toUtc().toIso8601String();
+    for (final entry in desired.entries) {
+      final row = entry.value;
+      final scope = row['scope']! as String;
+      final current = existingByKey[entry.key];
+      if (current == null) {
+        await txn.insert('shelf_entries', <String, Object?>{
+          ...row,
+          'sort_index': nextByScope[scope]!,
+          'created_at': now,
+          'updated_at': now,
+        });
+        nextByScope[scope] = nextByScope[scope]! + 1;
+      } else if (current['scope'] != scope) {
+        await txn.update(
+          'shelf_entries',
+          <String, Object?>{
+            'scope': scope,
+            'sort_index': nextByScope[scope]!,
+            'updated_at': now,
+          },
+          where: 'entity_type = ? AND entity_id = ?',
+          whereArgs: <Object?>[row['entity_type'], row['entity_id']],
+        );
+        nextByScope[scope] = nextByScope[scope]! + 1;
+      }
+    }
+  }
+
+  Future<void> reorderShelfEntries(
+    String scope,
+    List<String> orderedKeys,
+  ) async {
+    final db = await _database.instance;
+    await db.transaction((txn) async {
+      await _repairShelfEntries(txn);
+      final rows = await txn.query(
+        'shelf_entries',
+        columns: <String>['entity_type', 'entity_id'],
+        where: 'scope = ?',
+        whereArgs: <Object?>[scope],
+      );
+      final currentKeys = rows
+          .map((row) => '${row['entity_type']}:${row['entity_id']}')
+          .toSet();
+      if (currentKeys.length != orderedKeys.length ||
+          !currentKeys.containsAll(orderedKeys)) {
+        throw StateError('书架排序项与当前数据不一致');
+      }
+      final now = DateTime.now().toUtc().toIso8601String();
+      for (var index = 0; index < orderedKeys.length; index++) {
+        final parts = orderedKeys[index].split(':');
+        if (parts.length != 2) throw const FormatException('书架排序键无效');
+        await txn.update(
+          'shelf_entries',
+          <String, Object?>{'sort_index': index, 'updated_at': now},
+          where: 'entity_type = ? AND entity_id = ? AND scope = ?',
+          whereArgs: <Object?>[parts[0], parts[1], scope],
+        );
+      }
+    });
+  }
+
   Future<ShelfFolder> createFolder(String name) async {
     final normalized = name.trim();
     if (normalized.isEmpty) {
@@ -813,7 +942,7 @@ class LibraryRepository {
             .toList(growable: false);
     return <String, Object?>{
       'format': 'private-manga-reader-backup',
-      'version': 3,
+      'version': 4,
       'createdAt': DateTime.now().toUtc().toIso8601String(),
       'comics': await db.query('comics', orderBy: 'sort_index'),
       'assets': await db.query('assets'),
@@ -825,6 +954,10 @@ class LibraryRepository {
       'shelfFolders': await db.query(
         'shelf_folders',
         orderBy: 'sort_index, created_at',
+      ),
+      'shelfEntries': await db.query(
+        'shelf_entries',
+        orderBy: 'scope, sort_index, created_at',
       ),
       'pageBookmarks': await db.query(
         'page_bookmarks',
@@ -850,7 +983,7 @@ class LibraryRepository {
   Future<void> replaceFromManifest(Map<String, Object?> manifest) async {
     final version = manifest['version'];
     if (manifest['format'] != 'private-manga-reader-backup' ||
-        (version != 1 && version != 2 && version != 3)) {
+        (version != 1 && version != 2 && version != 3 && version != 4)) {
       throw const FormatException('不支持的备份格式');
     }
     final db = await _database.instance;
@@ -858,32 +991,36 @@ class LibraryRepository {
     final comics = _rows(manifest['comics']);
     final items = _rows(manifest['comicItems']);
     final settings = _rows(manifest['settings']);
-    final folders = version == 3
+    final folders = version == 3 || version == 4
         ? _rows(manifest['shelfFolders'])
         : const <Map<String, Object?>>[];
-    final bookmarks = version == 3
+    final shelfEntries = version == 4
+        ? _rows(manifest['shelfEntries'])
+        : const <Map<String, Object?>>[];
+    final bookmarks = version == 3 || version == 4
         ? _rows(manifest['pageBookmarks'])
         : const <Map<String, Object?>>[];
-    final readingLists = version == 3
+    final readingLists = version == 3 || version == 4
         ? _rows(manifest['readingLists'])
         : const <Map<String, Object?>>[];
-    final readingListItems = version == 3
+    final readingListItems = version == 3 || version == 4
         ? _rows(manifest['readingListItems'])
         : const <Map<String, Object?>>[];
-    final networkSources = version == 2 || version == 3
+    final networkSources = version == 2 || version == 3 || version == 4
         ? _rows(manifest['networkSources'])
         : const <Map<String, Object?>>[];
-    final remoteBooks = version == 2 || version == 3
+    final remoteBooks = version == 2 || version == 3 || version == 4
         ? _rows(manifest['remoteBooks'])
         : const <Map<String, Object?>>[];
-    final remotePages = version == 2 || version == 3
+    final remotePages = version == 2 || version == 3 || version == 4
         ? _rows(manifest['remotePages'])
         : const <Map<String, Object?>>[];
     await db.transaction((txn) async {
+      await txn.delete('shelf_entries');
       await txn.delete('reading_list_items');
       await txn.delete('reading_lists');
       await txn.delete('page_bookmarks');
-      if (version == 2 || version == 3) {
+      if (version == 2 || version == 3 || version == 4) {
         await txn.delete('remote_pages');
         await txn.delete('remote_books');
         await txn.delete('network_sources');
@@ -901,6 +1038,9 @@ class LibraryRepository {
       }
       for (final row in comics) {
         await txn.insert('comics', row);
+      }
+      for (final row in shelfEntries) {
+        await txn.insert('shelf_entries', row);
       }
       for (final row in items) {
         await txn.insert('comic_items', row);

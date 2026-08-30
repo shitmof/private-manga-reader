@@ -11,7 +11,7 @@ class AppDatabase {
   final DatabaseFactory _factory;
   final String? overridePath;
   Database? _database;
-  static const schemaVersion = 5;
+  static const schemaVersion = 6;
 
   Future<Database> get instance async {
     final existing = _database;
@@ -75,6 +75,7 @@ class AppDatabase {
       )
     ''');
     await db.execute('CREATE INDEX idx_comics_folder ON comics(folder_id)');
+    await _createShelfEntrySchema(db);
     await db.execute('''
       CREATE TABLE comic_items (
         id TEXT PRIMARY KEY,
@@ -149,6 +150,63 @@ class AppDatabase {
       await db.execute(
         'ALTER TABLE network_sources ADD COLUMN last_error TEXT',
       );
+    }
+    if (oldVersion < 6) {
+      await _createShelfEntrySchema(db);
+      await _populateShelfEntries(db);
+    }
+  }
+
+  Future<void> _createShelfEntrySchema(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS shelf_entries (
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        sort_index INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(entity_type, entity_id)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_shelf_entries_scope_sort '
+      'ON shelf_entries(scope, sort_index)',
+    );
+  }
+
+  Future<void> _populateShelfEntries(DatabaseExecutor db) async {
+    final existing = Sqflite.firstIntValue(
+      await db.rawQuery('SELECT COUNT(*) FROM shelf_entries'),
+    );
+    if ((existing ?? 0) > 0) return;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final next = <String, int>{'root': 0, 'private': 0};
+    final folders = await db.query(
+      'shelf_folders',
+      columns: <String>['id', 'is_private'],
+      orderBy: 'sort_index, created_at',
+    );
+    final comics = await db.query(
+      'comics',
+      columns: <String>['id', 'is_private'],
+      where: 'folder_id IS NULL AND deleted_at IS NULL',
+      orderBy: 'sort_index, created_at',
+    );
+    for (final row in <Map<String, Object?>>[...folders, ...comics]) {
+      final isFolder = folders.contains(row);
+      final scope = ((row['is_private'] as int?) ?? 0) == 1
+          ? 'private'
+          : 'root';
+      await db.insert('shelf_entries', <String, Object?>{
+        'entity_type': isFolder ? 'folder' : 'comic',
+        'entity_id': row['id'],
+        'scope': scope,
+        'sort_index': next[scope]!,
+        'created_at': now,
+        'updated_at': now,
+      });
+      next[scope] = next[scope]! + 1;
     }
   }
 

@@ -32,6 +32,7 @@ class _LibraryScreenState extends State<LibraryScreen>
   Set<String> _readingListComicIds = const <String>{};
   bool _privateUnlocked = false;
   bool _selectionMode = false;
+  bool _organizeMode = false;
   bool _handlingIncomingArchives = false;
   final Set<String> _selectedIds = <String>{};
 
@@ -97,11 +98,16 @@ class _LibraryScreenState extends State<LibraryScreen>
 
   bool get _hasInternalBackTarget =>
       _selectionMode ||
+      _organizeMode ||
       _folderId != null ||
       _readingListId != null ||
       _scope != _LibraryScope.all;
 
   void _handleBack() {
+    if (_organizeMode) {
+      setState(() => _organizeMode = false);
+      return;
+    }
     if (_selectionMode) {
       setState(() {
         _selectionMode = false;
@@ -116,6 +122,66 @@ class _LibraryScreenState extends State<LibraryScreen>
       _scope = _LibraryScope.all;
       _privateUnlocked = false;
     });
+  }
+
+  List<ShelfEntry> _gridEntries(
+    List<ComicSummary> comics,
+    List<ShelfFolder> folders,
+  ) {
+    final usesPersistentRootOrder =
+        _folderId == null &&
+        _readingListId == null &&
+        (_scope == _LibraryScope.all || _scope == _LibraryScope.private);
+    if (usesPersistentRootOrder) {
+      final scope = _scope == _LibraryScope.private ? 'private' : 'root';
+      final comicIds = comics.map((item) => item.comic.id).toSet();
+      final folderIds = folders.map((item) => item.id).toSet();
+      return controller.shelfEntries
+          .where(
+            (entry) =>
+                entry.scope == scope &&
+                (entry.kind == ShelfEntryKind.comic
+                    ? comicIds.contains(entry.entityId)
+                    : folderIds.contains(entry.entityId)),
+          )
+          .toList(growable: false);
+    }
+    var index = 0;
+    return <ShelfEntry>[
+      ...folders.map(
+        (folder) => ShelfEntry(
+          kind: ShelfEntryKind.folder,
+          entityId: folder.id,
+          scope: 'view',
+          sortIndex: index++,
+        ),
+      ),
+      ...comics.map(
+        (summary) => ShelfEntry(
+          kind: ShelfEntryKind.comic,
+          entityId: summary.comic.id,
+          scope: 'view',
+          sortIndex: index++,
+        ),
+      ),
+    ];
+  }
+
+  Future<void> _reorderShelf(String fromKey, String toKey) async {
+    if (fromKey == toKey || !mounted) return;
+    final scope = _scope == _LibraryScope.private ? 'private' : 'root';
+    final ordered = controller.shelfEntries
+        .where((entry) => entry.scope == scope)
+        .toList();
+    final from = ordered.indexWhere((entry) => entry.key == fromKey);
+    final to = ordered.indexWhere((entry) => entry.key == toKey);
+    if (from < 0 || to < 0) return;
+    final moved = ordered.removeAt(from);
+    ordered.insert(to, moved);
+    await controller.reorderShelfEntries(
+      scope,
+      ordered.map((entry) => entry.key).toList(growable: false),
+    );
   }
 
   @override
@@ -142,6 +208,11 @@ class _LibraryScreenState extends State<LibraryScreen>
                       .toList(),
                 _ => const <ShelfFolder>[],
               };
+        final gridEntries = _gridEntries(comics, visibleFolders);
+        final canOrganize =
+            _folderId == null &&
+            _readingListId == null &&
+            (_scope == _LibraryScope.all || _scope == _LibraryScope.private);
         return PopScope<void>(
           canPop: !_hasInternalBackTarget,
           onPopInvokedWithResult: (didPop, _) {
@@ -158,6 +229,8 @@ class _LibraryScreenState extends State<LibraryScreen>
                     ),
               title: _selectionMode
                   ? Text('已选 ${_selectedIds.length} 本')
+                  : _organizeMode
+                  ? const Text('整理书架')
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
@@ -187,6 +260,13 @@ class _LibraryScreenState extends State<LibraryScreen>
                         child: const Text('取消'),
                       ),
                     ]
+                  : _organizeMode
+                  ? <Widget>[
+                      TextButton(
+                        onPressed: () => setState(() => _organizeMode = false),
+                        child: const Text('完成'),
+                      ),
+                    ]
                   : <Widget>[
                       IconButton(
                         tooltip: '搜索',
@@ -200,48 +280,18 @@ class _LibraryScreenState extends State<LibraryScreen>
                         icon: const Icon(Icons.search_rounded),
                       ),
                       IconButton(
+                        tooltip: '整理书架',
+                        onPressed: canOrganize && gridEntries.length > 1
+                            ? () => setState(() => _organizeMode = true)
+                            : null,
+                        icon: const Icon(Icons.swap_vert_rounded),
+                      ),
+                      IconButton(
                         tooltip: '批量管理',
                         onPressed: comics.isEmpty
                             ? null
                             : () => setState(() => _selectionMode = true),
                         icon: const Icon(Icons.checklist_rounded),
-                      ),
-                      PopupMenuButton<String>(
-                        tooltip: '更多',
-                        onSelected: (value) {
-                          if (value == 'network') {
-                            Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => NetworkSourcesScreen(
-                                  controller: controller,
-                                ),
-                              ),
-                            );
-                          } else {
-                            Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) =>
-                                    SettingsScreen(controller: controller),
-                              ),
-                            );
-                          }
-                        },
-                        itemBuilder: (_) => const <PopupMenuEntry<String>>[
-                          PopupMenuItem(
-                            value: 'network',
-                            child: ListTile(
-                              leading: Icon(Icons.cloud_outlined),
-                              title: Text('网络书库'),
-                            ),
-                          ),
-                          PopupMenuItem(
-                            value: 'settings',
-                            child: ListTile(
-                              leading: Icon(Icons.tune_rounded),
-                              title: Text('设置'),
-                            ),
-                          ),
-                        ],
                       ),
                       const SizedBox(width: 4),
                     ],
@@ -257,10 +307,12 @@ class _LibraryScreenState extends State<LibraryScreen>
                       ? _EmptySection(scope: _scope)
                       : _LibraryGrid(
                           controller: controller,
+                          entries: gridEntries,
                           comics: comics,
                           folders: visibleFolders,
                           selectedIds: _selectedIds,
                           selectionMode: _selectionMode,
+                          organizeMode: _organizeMode,
                           onComicTap: _openComic,
                           onComicToggle: _toggleComic,
                           onMoveComicToFolder: (comicId, folderId) => controller
@@ -268,6 +320,7 @@ class _LibraryScreenState extends State<LibraryScreen>
                           onFolderTap: (folder) =>
                               setState(() => _folderId = folder.id),
                           onFolderMenu: _showFolderMenu,
+                          onReorder: _reorderShelf,
                         ),
                 ),
               ],
@@ -281,8 +334,28 @@ class _LibraryScreenState extends State<LibraryScreen>
                     onReadingList: _addSelectionToReadingList,
                     onDelete: _deleteSelection,
                   )
-                : null,
-            floatingActionButton: _selectionMode
+                : NavigationBar(
+                    selectedIndex: 0,
+                    onDestinationSelected: _openRootSection,
+                    destinations: const <NavigationDestination>[
+                      NavigationDestination(
+                        icon: Icon(Icons.collections_bookmark_outlined),
+                        selectedIcon: Icon(Icons.collections_bookmark_rounded),
+                        label: '书架',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.cloud_outlined),
+                        selectedIcon: Icon(Icons.cloud_rounded),
+                        label: '网络',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.tune_outlined),
+                        selectedIcon: Icon(Icons.tune_rounded),
+                        label: '设置',
+                      ),
+                    ],
+                  ),
+            floatingActionButton: _selectionMode || _organizeMode
                 ? null
                 : FloatingActionButton(
                     onPressed: () => _createComic(context),
@@ -297,6 +370,14 @@ class _LibraryScreenState extends State<LibraryScreen>
 
   bool get _isCompletelyEmpty =>
       controller.library.isEmpty && controller.folders.isEmpty;
+
+  void _openRootSection(int index) {
+    if (index == 0) return;
+    final Widget screen = index == 1
+        ? NetworkSourcesScreen(controller: controller)
+        : SettingsScreen(controller: controller);
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
+  }
 
   Widget _buildScopeBar() {
     return SingleChildScrollView(
@@ -509,13 +590,25 @@ class _LibraryScreenState extends State<LibraryScreen>
               title: const Text('移到书架根目录'),
               onTap: () => Navigator.pop(context, '__root__'),
             ),
-            ...controller.folders.map(
-              (folder) => ListTile(
-                leading: const Icon(Icons.folder_outlined),
+            ...controller.folders.map((folder) {
+              final contents = controller.library
+                  .where((summary) => summary.comic.folderId == folder.id)
+                  .toList(growable: false);
+              return ListTile(
+                leading: SizedBox.square(
+                  dimension: 52,
+                  child: _FolderMosaic(
+                    controller: controller,
+                    contents: contents,
+                    padding: 4,
+                    radius: 10,
+                  ),
+                ),
                 title: Text(folder.name),
+                subtitle: Text('${contents.length} 本'),
                 onTap: () => Navigator.pop(context, folder.id),
-              ),
-            ),
+              );
+            }),
           ],
         ),
       ),
@@ -772,30 +865,43 @@ class _EmptySection extends StatelessWidget {
   }
 }
 
+class _ShelfDragData {
+  const _ShelfDragData(this.entry);
+
+  final ShelfEntry entry;
+  String get key => entry.key;
+}
+
 class _LibraryGrid extends StatelessWidget {
   const _LibraryGrid({
     required this.controller,
+    required this.entries,
     required this.comics,
     required this.folders,
     required this.selectedIds,
     required this.selectionMode,
+    required this.organizeMode,
     required this.onComicTap,
     required this.onComicToggle,
     required this.onMoveComicToFolder,
     required this.onFolderTap,
     required this.onFolderMenu,
+    required this.onReorder,
   });
 
   final AppController controller;
+  final List<ShelfEntry> entries;
   final List<ComicSummary> comics;
   final List<ShelfFolder> folders;
   final Set<String> selectedIds;
   final bool selectionMode;
+  final bool organizeMode;
   final ValueChanged<ComicSummary> onComicTap;
   final ValueChanged<String> onComicToggle;
   final void Function(String comicId, String folderId) onMoveComicToFolder;
   final ValueChanged<ShelfFolder> onFolderTap;
   final ValueChanged<ShelfFolder> onFolderMenu;
+  final void Function(String fromKey, String toKey) onReorder;
 
   @override
   Widget build(BuildContext context) {
@@ -812,43 +918,81 @@ class _LibraryGrid extends StatelessWidget {
           mainAxisSpacing: 18,
           childAspectRatio: 0.57,
         ),
-        itemCount: folders.length + comics.length,
+        itemCount: entries.length,
         itemBuilder: (context, index) {
-          if (index < folders.length) {
-            final folder = folders[index];
+          final entry = entries[index];
+          final Widget card;
+          if (entry.kind == ShelfEntryKind.folder) {
+            final folder = folders.firstWhere(
+              (item) => item.id == entry.entityId,
+            );
             final contents = controller.library
                 .where((summary) => summary.comic.folderId == folder.id)
                 .toList();
-            return DragTarget<String>(
-              onWillAcceptWithDetails: (_) => true,
+            card = _FolderCard(
+              key: ValueKey<String>('shelf-entry-${entry.key}'),
+              controller: controller,
+              folder: folder,
+              contents: contents,
+              organizeMode: organizeMode,
+              onTap: () => onFolderTap(folder),
+              onMenu: () => onFolderMenu(folder),
+            );
+          } else {
+            final summary = comics.firstWhere(
+              (item) => item.comic.id == entry.entityId,
+            );
+            final selected = selectedIds.contains(summary.comic.id);
+            card = _ComicCard(
+              key: ValueKey<String>('shelf-entry-${entry.key}'),
+              controller: controller,
+              summary: summary,
+              selected: selected,
+              selectionMode: selectionMode,
+              organizeMode: organizeMode,
+              onTap: () => onComicTap(summary),
+              onToggle: () => onComicToggle(summary.comic.id),
+            );
+          }
+          if (selectionMode) return card;
+
+          if (organizeMode) {
+            return DragTarget<_ShelfDragData>(
+              onWillAcceptWithDetails: (details) =>
+                  details.data.key != entry.key,
               onAcceptWithDetails: (details) =>
-                  onMoveComicToFolder(details.data, folder.id),
+                  onReorder(details.data.key, entry.key),
               builder: (context, candidates, _) => AnimatedScale(
                 scale: candidates.isEmpty ? 1 : 0.94,
                 duration: const Duration(milliseconds: 140),
-                child: _FolderCard(
-                  controller: controller,
-                  folder: folder,
-                  contents: contents,
-                  onTap: () => onFolderTap(folder),
-                  onMenu: () => onFolderMenu(folder),
+                child: LongPressDraggable<_ShelfDragData>(
+                  data: _ShelfDragData(entry),
+                  feedback: _dragFeedback(context, card),
+                  childWhenDragging: Opacity(opacity: 0.25, child: card),
+                  child: card,
                 ),
               ),
             );
           }
-          final summary = comics[index - folders.length];
-          final selected = selectedIds.contains(summary.comic.id);
-          final card = _ComicCard(
-            controller: controller,
-            summary: summary,
-            selected: selected,
-            selectionMode: selectionMode,
-            onTap: () => onComicTap(summary),
-            onToggle: () => onComicToggle(summary.comic.id),
-          );
-          if (selectionMode) return card;
-          return LongPressDraggable<String>(
-            data: summary.comic.id,
+
+          if (entry.kind == ShelfEntryKind.folder) {
+            final folder = folders.firstWhere(
+              (item) => item.id == entry.entityId,
+            );
+            return DragTarget<_ShelfDragData>(
+              onWillAcceptWithDetails: (details) =>
+                  details.data.entry.kind == ShelfEntryKind.comic,
+              onAcceptWithDetails: (details) =>
+                  onMoveComicToFolder(details.data.entry.entityId, folder.id),
+              builder: (context, candidates, _) => AnimatedScale(
+                scale: candidates.isEmpty ? 1 : 0.94,
+                duration: const Duration(milliseconds: 140),
+                child: card,
+              ),
+            );
+          }
+          return LongPressDraggable<_ShelfDragData>(
+            data: _ShelfDragData(entry),
             feedback: SizedBox(
               width: 112,
               height: 196,
@@ -866,6 +1010,17 @@ class _LibraryGrid extends StatelessWidget {
       ),
     );
   }
+
+  Widget _dragFeedback(BuildContext context, Widget card) => SizedBox(
+    width: 112,
+    height: 196,
+    child: Material(
+      elevation: 8,
+      borderRadius: BorderRadius.circular(14),
+      color: Theme.of(context).colorScheme.surface,
+      child: card,
+    ),
+  );
 }
 
 class _FolderCard extends StatelessWidget {
@@ -873,13 +1028,16 @@ class _FolderCard extends StatelessWidget {
     required this.controller,
     required this.folder,
     required this.contents,
+    required this.organizeMode,
     required this.onTap,
     required this.onMenu,
+    super.key,
   });
 
   final AppController controller;
   final ShelfFolder folder;
   final List<ComicSummary> contents;
+  final bool organizeMode;
   final VoidCallback onTap;
   final VoidCallback onMenu;
 
@@ -887,53 +1045,14 @@ class _FolderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final previews = contents.take(4).toList();
     return InkWell(
-      onTap: onTap,
-      onLongPress: onMenu,
+      onTap: organizeMode ? null : onTap,
+      onLongPress: organizeMode ? null : onMenu,
       borderRadius: BorderRadius.circular(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(7),
-              decoration: BoxDecoration(
-                color: ShelfColors.blueSoft,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: ShelfColors.line),
-              ),
-              child: previews.isEmpty
-                  ? const Center(
-                      child: Icon(
-                        Icons.folder_outlined,
-                        size: 34,
-                        color: ShelfColors.blue,
-                      ),
-                    )
-                  : GridView.builder(
-                      physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            crossAxisSpacing: 3,
-                            mainAxisSpacing: 3,
-                          ),
-                      itemCount: previews.length,
-                      itemBuilder: (_, index) {
-                        final preview = previews[index];
-                        return ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: preview.coverStoredPath == null
-                              ? const ColoredBox(color: Colors.white)
-                              : PrivateImage(
-                                  controller: controller,
-                                  originalPath: preview.coverStoredPath!,
-                                  thumbnailPath: preview.coverThumbnailPath,
-                                  cacheWidth: 160,
-                                ),
-                        );
-                      },
-                    ),
-            ),
+            child: _FolderMosaic(controller: controller, contents: previews),
           ),
           const SizedBox(height: 8),
           Row(
@@ -951,10 +1070,13 @@ class _FolderCard extends StatelessWidget {
                   padding: EdgeInsets.only(right: 3),
                   child: Icon(Icons.lock_rounded, size: 14),
                 ),
-              InkWell(
-                onTap: onMenu,
-                child: const Icon(Icons.more_horiz_rounded, size: 18),
-              ),
+              if (!organizeMode)
+                InkWell(
+                  onTap: onMenu,
+                  child: const Icon(Icons.more_horiz_rounded, size: 18),
+                )
+              else
+                const Icon(Icons.drag_indicator_rounded, size: 18),
             ],
           ),
           Text(
@@ -969,20 +1091,95 @@ class _FolderCard extends StatelessWidget {
   }
 }
 
+class _FolderMosaic extends StatelessWidget {
+  const _FolderMosaic({
+    required this.controller,
+    required this.contents,
+    this.padding = 7,
+    this.radius = 14,
+  });
+
+  final AppController controller;
+  final List<ComicSummary> contents;
+  final double padding;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final previews = contents.take(4).toList(growable: false);
+    return Container(
+      padding: EdgeInsets.all(padding),
+      decoration: BoxDecoration(
+        color: ShelfColors.blueSoft,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(color: ShelfColors.line),
+      ),
+      child: GridView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.zero,
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: 3,
+          mainAxisSpacing: 3,
+        ),
+        itemCount: 4,
+        itemBuilder: (_, index) {
+          final preview = index < previews.length ? previews[index] : null;
+          return ClipRRect(
+            key: ValueKey<String>('folder-mosaic-slot-$index'),
+            borderRadius: BorderRadius.circular(4),
+            child: preview == null
+                ? ColoredBox(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surface.withValues(alpha: 0.72),
+                    child: index == 0 && previews.isEmpty
+                        ? const Icon(
+                            Icons.folder_outlined,
+                            size: 18,
+                            color: ShelfColors.blue,
+                          )
+                        : null,
+                  )
+                : preview.coverStoredPath == null
+                ? ColoredBox(
+                    color: Theme.of(context).colorScheme.surface,
+                    child: const Icon(
+                      Icons.image_outlined,
+                      size: 15,
+                      color: ShelfColors.muted,
+                    ),
+                  )
+                : PrivateImage(
+                    controller: controller,
+                    originalPath: preview.coverStoredPath!,
+                    thumbnailPath: preview.coverThumbnailPath,
+                    cacheWidth: 160,
+                  ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _ComicCard extends StatelessWidget {
   const _ComicCard({
     required this.controller,
     required this.summary,
     required this.selected,
     required this.selectionMode,
+    required this.organizeMode,
     required this.onTap,
     required this.onToggle,
+    super.key,
   });
 
   final AppController controller;
   final ComicSummary summary;
   final bool selected;
   final bool selectionMode;
+  final bool organizeMode;
   final VoidCallback onTap;
   final VoidCallback onToggle;
 
@@ -990,7 +1187,7 @@ class _ComicCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final comic = summary.comic;
     return InkWell(
-      onTap: selectionMode ? onToggle : onTap,
+      onTap: organizeMode ? null : (selectionMode ? onToggle : onTap),
       borderRadius: BorderRadius.circular(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1037,6 +1234,12 @@ class _ComicCard extends StatelessWidget {
                       onChanged: (_) => onToggle(),
                       fillColor: const WidgetStatePropertyAll(ShelfColors.blue),
                     ),
+                  ),
+                if (organizeMode)
+                  const Positioned(
+                    right: 6,
+                    bottom: 6,
+                    child: _CardBadge(icon: Icons.drag_indicator_rounded),
                   ),
                 if (summary.itemCount > 0)
                   Positioned(
