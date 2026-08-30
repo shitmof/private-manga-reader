@@ -1,13 +1,14 @@
-# 私人书架
+# 拾画阁
 
 本地优先、私有、无社交负担的手机漫画与插画阅读器。
 
-它可以把相册、文件或漫画压缩包中的原图整理成一本本漫画，也可以只读挂载个人网络书库；阅读记录始终保存在本机。
+它可以把相册、文件或漫画压缩包中的原图整理成一本本漫画，也可以原地挂载手机目录或只读挂载个人网络书库；阅读记录始终保存在本机。
 
 ## 已实现
 
 - 书架、漫画详情、三列编辑网格、沉浸式连续阅读和设置中心
 - 三列书架、文件夹分组、拖入分组、置顶、书单、搜索与私密书架
+- 主书架中的漫画和四宫格分组可混合拖动排序，分组始终显示固定 2×2 封面框
 - 从系统相册或文件选择器批量导入，保留选择顺序
 - 整包导入 CBZ/ZIP、CBR/RAR、CB7/7z、CBT/TAR；读取 `ComicInfo.xml`，按作者目录与数字自然顺序建册
 - 多个压缩包按系统选择队列依次解压；后一包始终追加在前一包末尾
@@ -24,6 +25,7 @@
 - 完整 `.mangabackup` 备份与恢复；可通过系统文档选择器保存到手机、SD 卡或云盘，卸载后仍可找回
 - 漫画移入回收站、恢复、永久删除；页面多选删除与无引用原图清理彼此分离
 - 只读挂载 WebDAV、OPDS/Komga/Kavita、SMB/NAS；网络缓存可清，阅读进度留在本机
+- Android SAF 原地挂载图片目录和 ZIP/CBZ：不复制原文件，压缩包按需直读，仅保存可重建索引和受控图片缓存
 - 挂载记录连接状态、最后成功/同步时间、脱敏错误和重新认证入口
 - Android 文件关联：在文件管理器点击 CBZ/ZIP/CBR/RAR/CB7/7z/CBT/TAR 可直接进入导入流程
 - 本地漫画按当前编辑顺序无损导出 CBZ，并可保存到手机/云盘或调用系统分享
@@ -34,9 +36,9 @@
 
 ## 下载 Android 安装包
 
-- [下载私人书架 v1.2.0 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.2.0/private-shelf-v1.2.0-android.apk)
-- 文件大小：65,968,254 字节（约 62.9 MiB）
-- SHA-256：`1ADC32170E0DFEC68D92AD06A08C5EABF1184756D6D1D66288BF5890CB14CBD8`
+- [下载拾画阁 v1.3.0 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.3.0/shihuage-v1.3.0-android.apk)
+- 文件大小：66,461,238 字节（约 63.4 MiB）
+- SHA-256：`C00FE7E1B244AED227E8A82EE19BCEEB7E878CE2F1520880D5AAF23E0CBC7A4C`
 - 兼容 ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`
 
 仓库是私有仓库，下载时需要登录获授权的 GitHub 账号。
@@ -49,11 +51,12 @@ App Documents/private_shelf/
 ├── thumbnails/      # 可清理、可重建的缩略图
 ├── backup-temp/     # 导入、备份和恢复临时文件
 ├── backups/         # App 内最近创建的完整备份
-└── network-cache/   # 可清理的只读网络漫画页面缓存
+├── network-cache/   # 可清理的只读网络漫画页面缓存
+└── external-cache/  # 可清理的 SAF 挂载页缓存；原文件仍在用户选择的目录
 
 Application Support/
 ├── library.db       # 漫画、书源索引、引用顺序、封面、进度和设置
-└── library.db.pre-v5 # 首次升级 v1.2 前自动保留的数据库快照
+└── library.db.pre-v6 # 首次升级 v1.3 前自动保留的数据库快照
 ```
 
 SQLite 只保存相对路径。备份恢复到另一台设备时不会依赖旧设备绝对路径。
@@ -75,6 +78,8 @@ Windows 上 Flutter AOT 对中文真实路径仍有兼容性边界。代码保�
 ## 产品与回退
 
 - 产品行为规格：[docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md)
+- v1.3 品牌、书架与低占用存储方案：[docs/V1.3_SHIHUAGE_BRAND_UI_STORAGE_PLAN.md](docs/V1.3_SHIHUAGE_BRAND_UI_STORAGE_PLAN.md)
+- v1.3 发布说明：[docs/RELEASE_NOTES_V1.3.0.md](docs/RELEASE_NOTES_V1.3.0.md)
 - v1.2 总体设计与实施结果：[docs/V1.2_SHELF_GROUPING_READER_NAVIGATION_DESIGN.md](docs/V1.2_SHELF_GROUPING_READER_NAVIGATION_DESIGN.md)
 - v1.2 发布说明：[docs/RELEASE_NOTES_V1.2.0.md](docs/RELEASE_NOTES_V1.2.0.md)
 - 版本回退说明：[docs/ROLLBACK.md](docs/ROLLBACK.md)

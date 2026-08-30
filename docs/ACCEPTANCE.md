@@ -2,6 +2,56 @@
 
 验收日期：2026-08-30
 
+## V1.3.0 最终验收
+
+### 自动化与数据格式
+
+- `flutter analyze`：零问题。
+- `flutter test`：33 项全部通过。
+- 新增回归覆盖：混合书架节点排序、四宫格分组、备份 manifest 4、SAF 图片目录与 CBZ 原地直读。
+- SQLite schema 从 5 增量升级到 6，新增 `shelf_entries`，不移动或重编码旧原图；升级安全快照路径为 `library.db.pre-v6`。
+- 备份 manifest 升到 4，保留漫画/分组混合顺序和本地挂载书源标识；外部原文件不塞进备份，恢复后明确要求重新选择原目录。
+
+### v1.2.0 原位升级
+
+- 下载并核对 GitHub v1.2.0 APK，SHA-256 为 `1ADC32170E0DFEC68D92AD06A08C5EABF1184756D6D1D66288BF5890CB14CBD8`。
+- 在 Android 模拟器安装 `v1.2.0+3`，建立 `Upgrade_Keep_Group`，再用 `adb install -r` 覆盖安装 `v1.3.0+4`；未卸载、未清数据。
+- 升级后旧分组和书架内容仍在，数据库完成 schema 5 → 6 迁移，并以固定四宫格分组卡呈现。
+- 最终非 Debug Release APK 再次覆盖安装成功，包名和签名不变，冷启动正常。
+
+### Android SAF 原地挂载实测
+
+- 在手机存储创建 `ShihuageMount`，包含图片目录 `LoosePages` 和 `MountedDemo.cbz`；CBZ 内页名为 `1.png`、`2.png`、`10.png`。
+- 通过 Android 系统目录选择器授权后，App 扫描出 2 本漫画；图片目录为 2 页，CBZ 为 3 页，均按数字自然顺序直接阅读。
+- 原地挂载不把原图复制进 App 永久资源目录；ZIP/CBZ 使用随机访问，页面缓存限制为 120 项或 96 MiB。
+- 阅读 CBZ 跳到第 3 页后返回，列表显示对应本地阅读进度；正式 APK 覆盖安装后挂载源仍显示“2 本 · 已连接”。
+- 修复了部分 Android DocumentsProvider 不允许把目录树 URI 当作普通文件查询的问题，目录名称改由 tree document ID 安全解析。
+
+### 交互回归
+
+- App 名称、桌面标签和关于页统一为“拾画阁”，图标替换为多层画册与书签图形。
+- 书单、分组、私密区和搜索状态使用统一内部返回逻辑；侧滑/系统返回先回书架根状态，不直接退出 App。
+- 设置页图片间距不再常驻大滑杆；主书架保持三列，漫画与分组支持混合拖动排序和拖入分组。
+- 阅读页顶部返回按钮与系统返回均能保存阅读进度后返回列表。
+
+### 最终 APK
+
+- 文件：`shihuage-v1.3.0-android.apk`
+- 包名：`com.shitmof.private_manga_reader`
+- 版本：`1.3.0+4`
+- 最低 SDK 24，目标 SDK 36。
+- ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`。
+- 大小：66,461,238 字节（约 63.4 MiB）。
+- SHA-256：`C00FE7E1B244AED227E8A82EE19BCEEB7E878CE2F1520880D5AAF23E0CBC7A4C`。
+- APK Signature Scheme v2 校验通过；签名证书 SHA-256：`3724690e26bae1597ad10221c10f2b2b15ade2a5bfdbaf408834dc46eaace1a5`，与 v1.2.0 一致。
+
+### 已知边界
+
+- SAF 原地随机读取当前覆盖图片目录与 ZIP/CBZ；CBR/RAR、CB7/7z、CBT/TAR 继续走普通无损导入流程。
+- Android 目录授权由系统和文件提供器维护。若用户移动目录、撤销授权、清除 App 数据或换机，需重新选择原目录；备份不会复制这些外部原文件。
+- WebDAV 与 OPDS 已有真实服务链路测试；当前环境仍没有用户的真实 SMB/NAS 账号，不宣称覆盖所有 NAS 型号。
+- Windows Flutter AOT 对中文真实路径仍有限制；正式包由同一提交导出到纯英文临时目录构建，并对成品重新验签、安装和校验哈希。
+
 ## V1.2.0 最终验收
 
 ### 自动化、安全与核心逻辑
