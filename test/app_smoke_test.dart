@@ -19,8 +19,10 @@ void main() {
     expect(formatBytes(1024 * 1024), '1.0 MB');
   });
 
-  test('应用图标是有效且非空的高清方图', () {
-    final bytes = File('assets/branding/app_icon.png').readAsBytesSync();
+  test('拾画阁应用图标是有效且非空的高清方图', () {
+    final bytes = File(
+      'assets/branding/shihuage_icon_master.png',
+    ).readAsBytesSync();
     final icon = img.decodePng(bytes);
     expect(icon, isNotNull);
     expect(icon!.width, icon.height);
@@ -36,5 +38,12 @@ void main() {
     }
     expect(visibleSamples, greaterThan(100));
     expect(coloredSamples, greaterThan(100));
+
+    final foreground = img.decodePng(
+      File('assets/branding/shihuage_icon_foreground.png').readAsBytesSync(),
+    );
+    expect(foreground, isNotNull);
+    expect(foreground!.numChannels, 4);
+    expect(foreground.getPixel(0, 0).a, 0);
   });
 }

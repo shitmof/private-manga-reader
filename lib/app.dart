@@ -15,7 +15,7 @@ class PrivateShelfApp extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) => MaterialApp(
-        title: '私人书架',
+        title: '拾画阁',
         debugShowCheckedModeBanner: false,
         theme: buildShelfTheme(Brightness.light),
         darkTheme: buildShelfTheme(Brightness.dark),

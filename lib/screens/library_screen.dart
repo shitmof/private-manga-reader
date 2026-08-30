@@ -95,6 +95,29 @@ class _LibraryScreenState extends State<LibraryScreen>
     return null;
   }
 
+  bool get _hasInternalBackTarget =>
+      _selectionMode ||
+      _folderId != null ||
+      _readingListId != null ||
+      _scope != _LibraryScope.all;
+
+  void _handleBack() {
+    if (_selectionMode) {
+      setState(() {
+        _selectionMode = false;
+        _selectedIds.clear();
+      });
+      return;
+    }
+    setState(() {
+      _folderId = null;
+      _readingListId = null;
+      _readingListComicIds = const <String>{};
+      _scope = _LibraryScope.all;
+      _privateUnlocked = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -119,150 +142,154 @@ class _LibraryScreenState extends State<LibraryScreen>
                       .toList(),
                 _ => const <ShelfFolder>[],
               };
-        return Scaffold(
-          appBar: AppBar(
-            leading: _folderId == null && _readingListId == null
-                ? null
-                : IconButton(
-                    tooltip: '返回书架',
-                    onPressed: () => setState(() {
-                      _folderId = null;
-                      _readingListId = null;
-                      _readingListComicIds = const <String>{};
-                    }),
-                    icon: const Icon(Icons.arrow_back_ios_new_rounded),
-                  ),
-            title: _selectionMode
-                ? Text('已选 ${_selectedIds.length} 本')
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        _activeFolder?.name ??
-                            _activeReadingList?.name ??
-                            '私人书架',
-                      ),
-                      const Text(
-                        '只保存在你的设备中',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          color: ShelfColors.muted,
-                          letterSpacing: 0.15,
-                        ),
-                      ),
-                    ],
-                  ),
-            actions: _selectionMode
-                ? <Widget>[
-                    TextButton(
-                      onPressed: () => setState(() {
-                        _selectionMode = false;
-                        _selectedIds.clear();
-                      }),
-                      child: const Text('取消'),
+        return PopScope<void>(
+          canPop: !_hasInternalBackTarget,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _handleBack();
+          },
+          child: Scaffold(
+            appBar: AppBar(
+              leading: _folderId == null && _readingListId == null
+                  ? null
+                  : IconButton(
+                      tooltip: '返回书架',
+                      onPressed: _handleBack,
+                      icon: const Icon(Icons.arrow_back_ios_new_rounded),
                     ),
-                  ]
-                : <Widget>[
-                    IconButton(
-                      tooltip: '搜索',
-                      onPressed: () => showSearch<void>(
-                        context: context,
-                        delegate: _ComicSearchDelegate(
-                          controller: controller,
-                          includePrivate: _privateUnlocked,
+              title: _selectionMode
+                  ? Text('已选 ${_selectedIds.length} 本')
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          _activeFolder?.name ??
+                              _activeReadingList?.name ??
+                              '拾画阁',
                         ),
-                      ),
-                      icon: const Icon(Icons.search_rounded),
-                    ),
-                    IconButton(
-                      tooltip: '批量管理',
-                      onPressed: comics.isEmpty
-                          ? null
-                          : () => setState(() => _selectionMode = true),
-                      icon: const Icon(Icons.checklist_rounded),
-                    ),
-                    PopupMenuButton<String>(
-                      tooltip: '更多',
-                      onSelected: (value) {
-                        if (value == 'network') {
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) =>
-                                  NetworkSourcesScreen(controller: controller),
-                            ),
-                          );
-                        } else {
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) =>
-                                  SettingsScreen(controller: controller),
-                            ),
-                          );
-                        }
-                      },
-                      itemBuilder: (_) => const <PopupMenuEntry<String>>[
-                        PopupMenuItem(
-                          value: 'network',
-                          child: ListTile(
-                            leading: Icon(Icons.cloud_outlined),
-                            title: Text('网络书库'),
-                          ),
-                        ),
-                        PopupMenuItem(
-                          value: 'settings',
-                          child: ListTile(
-                            leading: Icon(Icons.tune_rounded),
-                            title: Text('设置'),
+                        const Text(
+                          '只保存在你的设备中',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: ShelfColors.muted,
+                            letterSpacing: 0.15,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(width: 4),
-                  ],
-          ),
-          body: Column(
-            children: <Widget>[
-              if (_folderId == null && _readingListId == null) _buildScopeBar(),
-              Expanded(
-                child: _isCompletelyEmpty
-                    ? _EmptyLibrary(onCreate: () => _createComic(context))
-                    : comics.isEmpty && visibleFolders.isEmpty
-                    ? _EmptySection(scope: _scope)
-                    : _LibraryGrid(
-                        controller: controller,
-                        comics: comics,
-                        folders: visibleFolders,
-                        selectedIds: _selectedIds,
-                        selectionMode: _selectionMode,
-                        onComicTap: _openComic,
-                        onComicToggle: _toggleComic,
-                        onMoveComicToFolder: (comicId, folderId) => controller
-                            .moveComicsToFolder(<String>[comicId], folderId),
-                        onFolderTap: (folder) =>
-                            setState(() => _folderId = folder.id),
-                        onFolderMenu: _showFolderMenu,
+              actions: _selectionMode
+                  ? <Widget>[
+                      TextButton(
+                        onPressed: () => setState(() {
+                          _selectionMode = false;
+                          _selectedIds.clear();
+                        }),
+                        child: const Text('取消'),
                       ),
-              ),
-            ],
-          ),
-          bottomNavigationBar: _selectionMode
-              ? _BatchActionBar(
-                  hasSelection: _selectedIds.isNotEmpty,
-                  onFolder: _moveSelectionToFolder,
-                  onPrivate: () => _setSelectionPrivate(true),
-                  onPin: () => _setSelectionPinned(true),
-                  onReadingList: _addSelectionToReadingList,
-                  onDelete: _deleteSelection,
-                )
-              : null,
-          floatingActionButton: _selectionMode
-              ? null
-              : FloatingActionButton(
-                  onPressed: () => _createComic(context),
-                  tooltip: '新建漫画或文件夹',
-                  child: const Icon(Icons.add_rounded),
+                    ]
+                  : <Widget>[
+                      IconButton(
+                        tooltip: '搜索',
+                        onPressed: () => showSearch<void>(
+                          context: context,
+                          delegate: _ComicSearchDelegate(
+                            controller: controller,
+                            includePrivate: _privateUnlocked,
+                          ),
+                        ),
+                        icon: const Icon(Icons.search_rounded),
+                      ),
+                      IconButton(
+                        tooltip: '批量管理',
+                        onPressed: comics.isEmpty
+                            ? null
+                            : () => setState(() => _selectionMode = true),
+                        icon: const Icon(Icons.checklist_rounded),
+                      ),
+                      PopupMenuButton<String>(
+                        tooltip: '更多',
+                        onSelected: (value) {
+                          if (value == 'network') {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => NetworkSourcesScreen(
+                                  controller: controller,
+                                ),
+                              ),
+                            );
+                          } else {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) =>
+                                    SettingsScreen(controller: controller),
+                              ),
+                            );
+                          }
+                        },
+                        itemBuilder: (_) => const <PopupMenuEntry<String>>[
+                          PopupMenuItem(
+                            value: 'network',
+                            child: ListTile(
+                              leading: Icon(Icons.cloud_outlined),
+                              title: Text('网络书库'),
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: 'settings',
+                            child: ListTile(
+                              leading: Icon(Icons.tune_rounded),
+                              title: Text('设置'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 4),
+                    ],
+            ),
+            body: Column(
+              children: <Widget>[
+                if (_folderId == null && _readingListId == null)
+                  _buildScopeBar(),
+                Expanded(
+                  child: _isCompletelyEmpty
+                      ? _EmptyLibrary(onCreate: () => _createComic(context))
+                      : comics.isEmpty && visibleFolders.isEmpty
+                      ? _EmptySection(scope: _scope)
+                      : _LibraryGrid(
+                          controller: controller,
+                          comics: comics,
+                          folders: visibleFolders,
+                          selectedIds: _selectedIds,
+                          selectionMode: _selectionMode,
+                          onComicTap: _openComic,
+                          onComicToggle: _toggleComic,
+                          onMoveComicToFolder: (comicId, folderId) => controller
+                              .moveComicsToFolder(<String>[comicId], folderId),
+                          onFolderTap: (folder) =>
+                              setState(() => _folderId = folder.id),
+                          onFolderMenu: _showFolderMenu,
+                        ),
                 ),
+              ],
+            ),
+            bottomNavigationBar: _selectionMode
+                ? _BatchActionBar(
+                    hasSelection: _selectedIds.isNotEmpty,
+                    onFolder: _moveSelectionToFolder,
+                    onPrivate: () => _setSelectionPrivate(true),
+                    onPin: () => _setSelectionPinned(true),
+                    onReadingList: _addSelectionToReadingList,
+                    onDelete: _deleteSelection,
+                  )
+                : null,
+            floatingActionButton: _selectionMode
+                ? null
+                : FloatingActionButton(
+                    onPressed: () => _createComic(context),
+                    tooltip: '新建漫画或文件夹',
+                    child: const Icon(Icons.add_rounded),
+                  ),
+          ),
         );
       },
     );

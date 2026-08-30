@@ -37,17 +37,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: <Widget>[
                 ListTile(
                   title: const Text('图片间距'),
-                  subtitle: Slider(
-                    value: preferences.imageGap,
-                    min: 8,
-                    max: 16,
-                    divisions: 4,
-                    label: '${preferences.imageGap.round()} dp',
-                    onChanged: (value) => widget.controller.updatePreferences(
-                      preferences.copyWith(imageGap: value),
-                    ),
+                  subtitle: const Text('调整连续阅读时图片之间的留白'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Text('${preferences.imageGap.round()} dp'),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.chevron_right_rounded),
+                    ],
                   ),
-                  trailing: Text('${preferences.imageGap.round()} dp'),
+                  onTap: () => _chooseImageGap(preferences),
                 ),
                 const Divider(height: 1, indent: 16),
                 SwitchListTile(
@@ -248,12 +247,97 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 24),
           const Center(
             child: Text(
-              '私人书架 1.2.0',
+              '拾画阁 1.3.0',
               style: TextStyle(color: ShelfColors.muted, fontSize: 12),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _chooseImageGap(ReaderPreferences initial) async {
+    var value = initial.imageGap.round().clamp(8, 16);
+    final selected = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text('图片间距', style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 6),
+                const Text(
+                  '只改变阅读显示，不处理或重编码原图。',
+                  style: TextStyle(color: ShelfColors.muted),
+                ),
+                const SizedBox(height: 18),
+                SegmentedButton<int>(
+                  showSelectedIcon: false,
+                  segments: const <ButtonSegment<int>>[
+                    ButtonSegment(value: 8, label: Text('紧凑 8')),
+                    ButtonSegment(value: 12, label: Text('标准 12')),
+                    ButtonSegment(value: 16, label: Text('宽松 16')),
+                  ],
+                  selected: <int>{
+                    value <= 10
+                        ? 8
+                        : value >= 14
+                        ? 16
+                        : 12,
+                  },
+                  onSelectionChanged: (selection) =>
+                      setSheetState(() => value = selection.first),
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    IconButton.filledTonal(
+                      tooltip: '减小间距',
+                      onPressed: value <= 8
+                          ? null
+                          : () => setSheetState(() => value--),
+                      icon: const Icon(Icons.remove_rounded),
+                    ),
+                    SizedBox(
+                      width: 92,
+                      child: Text(
+                        '$value dp',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ),
+                    IconButton.filledTonal(
+                      tooltip: '增大间距',
+                      onPressed: value >= 16
+                          ? null
+                          : () => setSheetState(() => value++),
+                      icon: const Icon(Icons.add_rounded),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(context, value),
+                    child: const Text('保存'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
+    await widget.controller.updatePreferences(
+      initial.copyWith(imageGap: selected.toDouble()),
     );
   }
 

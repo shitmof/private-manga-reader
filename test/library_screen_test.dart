@@ -21,6 +21,90 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 void main() {
   sqfliteFfiInit();
 
+  testWidgets('书单内系统返回回到拾画阁而不是退出应用', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final sandbox = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('shelf-back-test-'),
+    ))!;
+    final database = AppDatabase(
+      factory: databaseFactoryFfi,
+      overridePath: p.join(sandbox.path, 'library.db'),
+    );
+    final repository = LibraryRepository(database);
+    final storage = StorageService(
+      rootOverride: Directory(p.join(sandbox.path, 'files')),
+    );
+    await tester.runAsync(storage.initialize);
+    final importer = ImportService(repository, storage);
+    final archiveImporter = ArchiveImportService(repository, storage, importer);
+    final networkRepository = NetworkRepository(database);
+    final networkLibrary = NetworkLibraryService(
+      networkRepository,
+      storage,
+      archiveImporter,
+      MemoryNetworkCredentialStore(),
+    );
+    final controller = AppController(
+      repository,
+      storage,
+      importer,
+      archiveImporter,
+      BackupService(repository, storage),
+      networkRepository,
+      networkLibrary,
+      privacyAuthenticator: const AllowPrivacyAuthenticator(),
+    );
+    addTearDown(() async {
+      await networkLibrary.dispose();
+      await database.close();
+      if (await sandbox.exists()) await sandbox.delete(recursive: true);
+    });
+
+    await tester.runAsync(() async {
+      final comic = await repository.createComic('返回测试漫画');
+      final list = await repository.createReadingList('返回测试书单');
+      await repository.addComicsToReadingList(list.id, <String>[comic.id]);
+      await controller.initialize();
+    });
+    expect(
+      controller.readingLists.map((item) => item.name),
+      contains('返回测试书单'),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildShelfTheme(Brightness.light),
+        home: LibraryScreen(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final readingListChip = find.widgetWithText(ActionChip, '书单');
+    await tester.ensureVisible(readingListChip);
+    await tester.pump();
+    await tester.tap(readingListChip);
+    await tester.pumpAndSettle();
+    expect(find.text('本地书单'), findsOneWidget);
+    expect(find.text('返回测试书单'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ListTile, '返回测试书单'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('返回测试书单'), findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+
+    expect(find.text('拾画阁'), findsOneWidget);
+    expect(find.text('返回测试漫画'), findsOneWidget);
+  });
+
   testWidgets('书架使用三列、文件夹分组与验证后私密区', (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 3;
@@ -92,6 +176,21 @@ void main() {
       3,
     );
     expect(find.text('待看漫画'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+    expect(find.byType(Slider), findsNothing);
+    await tester.tap(find.text('图片间距'));
+    await tester.pumpAndSettle();
+    expect(find.text('只改变阅读显示，不处理或重编码原图。'), findsOneWidget);
+    expect(find.text('保存'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+
     await tester.tap(find.text('待看漫画'));
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('文件夹内漫画'), findsOneWidget);

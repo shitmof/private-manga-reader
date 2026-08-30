@@ -23,7 +23,7 @@ class BackupService {
     'private_manga_reader/documents',
   );
 
-  Future<File> createBackup({String prefix = 'private-shelf'}) async {
+  Future<File> createBackup({String prefix = 'shihuage'}) async {
     final stamp = _timestamp(DateTime.now());
     final staging = Directory(
       p.join(_storage.temporaryDirectory.path, 'backup-${_uuid.v4()}'),
@@ -63,8 +63,8 @@ class BackupService {
   Future<void> shareBackup(File backup) async {
     await SharePlus.instance.share(
       ShareParams(
-        title: '导出私人书架备份',
-        text: '私人书架完整本地备份',
+        title: '导出拾画阁备份',
+        text: '拾画阁完整本地备份',
         files: <XFile>[XFile(backup.path, mimeType: 'application/zip')],
       ),
     );
@@ -94,7 +94,7 @@ class BackupService {
   Future<PlatformFile?> pickBackup() => FilePicker.pickFile(
     type: FileType.custom,
     allowedExtensions: const <String>['mangabackup', 'zip'],
-    dialogTitle: '选择私人书架备份',
+    dialogTitle: '选择拾画阁备份',
   );
 
   Future<File> restoreBackup(PlatformFile source) async {
