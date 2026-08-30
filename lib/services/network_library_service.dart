@@ -61,6 +61,7 @@ class NetworkLibraryService {
   Future<List<RemoteBook>> discoverAndSave(NetworkSource source) async {
     final credentials = await _credentials.read(source.id);
     final discoveries = switch (source.type) {
+      NetworkSourceType.local => throw UnsupportedError('本地挂载由 SAF 服务处理'),
       NetworkSourceType.webdav => await _discoverWebDav(source, credentials),
       NetworkSourceType.opds => await _discoverOpds(source, credentials),
       NetworkSourceType.smb => await _discoverSmb(source, credentials),
@@ -75,6 +76,8 @@ class NetworkLibraryService {
     NetworkCredentials credentials,
   ) async {
     switch (source.type) {
+      case NetworkSourceType.local:
+        throw UnsupportedError('本地挂载由 SAF 服务处理');
       case NetworkSourceType.webdav:
         final root = _sourceRootUri(source);
         await _listWebDav(root, credentials, credentialOrigin: root);

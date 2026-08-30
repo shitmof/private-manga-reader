@@ -227,6 +227,8 @@ class NetworkRepository {
           'byte_size': page.byteSize,
           'width': page.width,
           'height': page.height,
+          'source_uri': page.sourceUri,
+          'archive_entry': page.archiveEntry,
         });
       }
       await txn.update(
@@ -237,6 +239,49 @@ class NetworkRepository {
               ? null
               : pages.first.relativePath,
           'cached_version': cachedVersion,
+          'cached_at': now,
+          'updated_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: <Object?>[bookId],
+      );
+    });
+  }
+
+  Future<void> replaceExternalPages(
+    String bookId, {
+    required String etag,
+    required List<RemotePage> pages,
+  }) async {
+    final db = await _database.instance;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((txn) async {
+      await txn.delete(
+        'remote_pages',
+        where: 'book_id = ?',
+        whereArgs: <Object?>[bookId],
+      );
+      for (var index = 0; index < pages.length; index++) {
+        final page = pages[index];
+        await txn.insert('remote_pages', <String, Object?>{
+          'id': page.id,
+          'book_id': bookId,
+          'position': index,
+          'relative_path': '',
+          'original_name': page.originalName,
+          'byte_size': page.byteSize,
+          'width': page.width,
+          'height': page.height,
+          'source_uri': page.sourceUri,
+          'archive_entry': page.archiveEntry,
+        });
+      }
+      await txn.update(
+        'remote_books',
+        <String, Object?>{
+          'page_count': pages.length,
+          'cover_relative_path': null,
+          'cached_version': 'external:$etag',
           'cached_at': now,
           'updated_at': now,
         },

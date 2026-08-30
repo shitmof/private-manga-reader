@@ -101,14 +101,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          const _SectionLabel('网络书库'),
+          const _SectionLabel('挂载与网络书库'),
           Card(
             margin: EdgeInsets.zero,
             child: Column(
               children: <Widget>[
                 ListTile(
                   leading: const Icon(Icons.cloud_outlined),
-                  title: const Text('网络书库'),
+                  title: const Text('挂载与网络书库'),
                   subtitle: Text(
                     controllerLabel(widget.controller.networkSources.length),
                   ),

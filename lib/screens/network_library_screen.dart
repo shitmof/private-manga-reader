@@ -36,9 +36,11 @@ class NetworkLibraryScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(source.name),
-                const Text(
-                  '远程只读 · 进度仅存本机',
-                  style: TextStyle(
+                Text(
+                  source.type == NetworkSourceType.local
+                      ? '原地直读 · 不复制原图'
+                      : '远程只读 · 进度仅存本机',
+                  style: const TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w500,
                     color: ShelfColors.muted,
@@ -56,7 +58,10 @@ class NetworkLibraryScreen extends StatelessWidget {
             ],
           ),
           body: books.isEmpty
-              ? _EmptyMountedSource(onRefresh: () => _refresh(context, source))
+              ? _EmptyMountedSource(
+                  isLocal: source.type == NetworkSourceType.local,
+                  onRefresh: () => _refresh(context, source),
+                )
               : GridView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -69,8 +74,11 @@ class NetworkLibraryScreen extends StatelessWidget {
                   itemBuilder: (context, index) => _RemoteBookCard(
                     controller: controller,
                     book: books[index],
+                    isLocal: source.type == NetworkSourceType.local,
                     onTap: () => _openBook(context, books[index]),
-                    onClearCache: books[index].pageCount == 0
+                    onClearCache:
+                        source.type == NetworkSourceType.local ||
+                            books[index].pageCount == 0
                         ? null
                         : () => _clearCache(context, books[index]),
                   ),
@@ -118,7 +126,7 @@ class NetworkLibraryScreen extends StatelessWidget {
         await showDialog<void>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('无法打开网络漫画'),
+            title: const Text('无法打开漫画'),
             content: Text(_friendly(error)),
             actions: <Widget>[
               FilledButton(
@@ -158,12 +166,14 @@ class _RemoteBookCard extends StatelessWidget {
   const _RemoteBookCard({
     required this.controller,
     required this.book,
+    required this.isLocal,
     required this.onTap,
     required this.onClearCache,
   });
 
   final AppController controller;
   final RemoteBook book;
+  final bool isLocal;
   final VoidCallback onTap;
   final VoidCallback? onClearCache;
 
@@ -195,9 +205,11 @@ class _RemoteBookCard extends StatelessWidget {
                           )
                         : ColoredBox(
                             color: ShelfColors.blueSoft,
-                            child: const Center(
+                            child: Center(
                               child: Icon(
-                                Icons.cloud_outlined,
+                                isLocal
+                                    ? Icons.folder_open_rounded
+                                    : Icons.cloud_outlined,
                                 color: ShelfColors.blue,
                                 size: 36,
                               ),
@@ -217,7 +229,9 @@ class _RemoteBookCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(999),
                       ),
                       child: Text(
-                        book.isCached ? '已缓存' : '网络',
+                        isLocal
+                            ? (book.isExternalIndexed ? '原地直读' : '本地')
+                            : (book.isCached ? '已缓存' : '网络'),
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 10,
@@ -278,8 +292,9 @@ class _RemoteBookCard extends StatelessWidget {
 }
 
 class _EmptyMountedSource extends StatelessWidget {
-  const _EmptyMountedSource({required this.onRefresh});
+  const _EmptyMountedSource({required this.isLocal, required this.onRefresh});
 
+  final bool isLocal;
   final VoidCallback onRefresh;
 
   @override
@@ -298,10 +313,12 @@ class _EmptyMountedSource extends StatelessWidget {
             const SizedBox(height: 18),
             Text('还没有扫描到漫画', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
-            const Text(
-              '检查根目录中是否有 CBZ、CBR、CB7、CBT、ZIP、RAR、7z 或 TAR 文件。',
+            Text(
+              isLocal
+                  ? '检查目录中是否有 ZIP/CBZ，或存放 JPG、PNG、WebP 的图片文件夹。'
+                  : '检查根目录中是否有 CBZ、CBR、CB7、CBT、ZIP、RAR、7z 或 TAR 文件。',
               textAlign: TextAlign.center,
-              style: TextStyle(color: ShelfColors.muted, height: 1.5),
+              style: const TextStyle(color: ShelfColors.muted, height: 1.5),
             ),
             const SizedBox(height: 22),
             FilledButton.icon(

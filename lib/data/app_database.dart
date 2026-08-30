@@ -152,8 +152,22 @@ class AppDatabase {
       );
     }
     if (oldVersion < 6) {
+      await _ensureRemotePageSourceColumns(db);
       await _createShelfEntrySchema(db);
       await _populateShelfEntries(db);
+    }
+  }
+
+  Future<void> _ensureRemotePageSourceColumns(DatabaseExecutor db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(remote_pages)');
+    final names = columns.map((row) => row['name']).toSet();
+    if (!names.contains('source_uri')) {
+      await db.execute('ALTER TABLE remote_pages ADD COLUMN source_uri TEXT');
+    }
+    if (!names.contains('archive_entry')) {
+      await db.execute(
+        'ALTER TABLE remote_pages ADD COLUMN archive_entry TEXT',
+      );
     }
   }
 
@@ -322,6 +336,8 @@ class AppDatabase {
         byte_size INTEGER NOT NULL,
         width INTEGER NOT NULL DEFAULT 0,
         height INTEGER NOT NULL DEFAULT 0,
+        source_uri TEXT,
+        archive_entry TEXT,
         UNIQUE(book_id, position),
         FOREIGN KEY(book_id) REFERENCES remote_books(id) ON DELETE CASCADE
       )

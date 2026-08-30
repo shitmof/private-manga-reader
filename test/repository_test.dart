@@ -17,6 +17,7 @@ import 'package:private_manga_reader/services/backup_service.dart';
 import 'package:private_manga_reader/services/archive_import_service.dart';
 import 'package:private_manga_reader/services/comic_export_service.dart';
 import 'package:private_manga_reader/services/import_service.dart';
+import 'package:private_manga_reader/services/local_mount_service.dart';
 import 'package:private_manga_reader/services/network_credential_store.dart';
 import 'package:private_manga_reader/services/network_library_service.dart';
 import 'package:private_manga_reader/services/storage_service.dart';
@@ -544,6 +545,59 @@ void main() {
     expect(restored.lastSyncAt, isNotNull);
   });
 
+  test('SAF 本地挂载只存索引，图片目录与 CBZ 都按原顺序直读', () async {
+    final network = NetworkRepository(database);
+    final platform = _FakeLocalMountPlatform();
+    final service = LocalMountService(network, platform: platform);
+    final source = await network.createSource(
+      name: '手机漫画',
+      type: NetworkSourceType.local,
+      endpoint: 'content://tree/manga',
+      rootPath: '手机漫画',
+      username: '',
+    );
+
+    final discovered = await service.discoverAndSave(source);
+    expect(discovered, hasLength(2));
+    final folderBook = discovered.firstWhere(
+      (book) => book.mediaType == LocalMountService.folderMediaType,
+    );
+    final archiveBook = discovered.firstWhere(
+      (book) => book.mediaType != LocalMountService.folderMediaType,
+    );
+
+    final folderPages = await service.prepareBook(folderBook);
+    expect(folderPages.map((page) => page.originalName), <String>[
+      '2.png',
+      '10.png',
+    ]);
+    expect(folderPages.every((page) => page.isExternal), isTrue);
+    expect(folderPages.every((page) => page.relativePath.isEmpty), isTrue);
+
+    final archivePages = await service.prepareBook(archiveBook);
+    expect(archivePages.map((page) => page.originalName), <String>[
+      'page-2.jpg',
+      'page-10.jpg',
+    ]);
+    expect(archivePages.first.archiveEntry, 'page-2.jpg');
+    expect((await network.getBook(archiveBook.id))!.isExternalIndexed, isTrue);
+    expect((await network.getBook(archiveBook.id))!.isCached, isFalse);
+
+    final bytes = await service.readPage(archivePages.first);
+    expect(utf8.decode(bytes), 'content://archive/book.cbz#page-2.jpg');
+
+    final manifest = await repository.exportManifest();
+    await repository.replaceFromManifest(manifest);
+    final restoredSource = (await network.loadSources()).single;
+    expect(restoredSource.id, source.id);
+    expect(restoredSource.connectionState, NetworkConnectionState.unknown);
+    expect(restoredSource.lastError, '等待重新选择原目录');
+    expect(
+      (await network.loadBooks(source.id)).map((book) => book.id),
+      containsAll(discovered.map((book) => book.id)),
+    );
+  });
+
   test('多个漫画压缩包按选择队列与文件名自然顺序连续追加', () async {
     final comic = await repository.createComic('压缩包队列');
     final existing = await _createPng(sandbox, 'existing.png');
@@ -906,6 +960,86 @@ Future<File> _createZip(
   final file = File(p.join(directory.path, name));
   await file.writeAsBytes(bytes, flush: true);
   return file;
+}
+
+final class _FakeLocalMountPlatform implements LocalMountPlatform {
+  @override
+  Future<MountedDirectorySelection?> pickDirectory() async =>
+      const MountedDirectorySelection(
+        uri: 'content://tree/manga',
+        name: '手机漫画',
+      );
+
+  @override
+  Future<List<LocalMountDocument>> scanTree(String uri) async =>
+      const <LocalMountDocument>[
+        LocalMountDocument(
+          uri: 'content://archive/book.cbz',
+          name: '第2话.cbz',
+          mimeType: 'application/zip',
+          size: 4096,
+          lastModified: 100,
+          parentUri: 'content://tree/manga/root',
+          relativeDir: '',
+        ),
+        LocalMountDocument(
+          uri: 'content://image/10',
+          name: '10.png',
+          mimeType: 'image/png',
+          size: 100,
+          lastModified: 20,
+          parentUri: 'content://folder/images',
+          relativeDir: '合集/图片目录',
+        ),
+        LocalMountDocument(
+          uri: 'content://image/2',
+          name: '2.png',
+          mimeType: 'image/png',
+          size: 90,
+          lastModified: 10,
+          parentUri: 'content://folder/images',
+          relativeDir: '合集/图片目录',
+        ),
+      ];
+
+  @override
+  Future<List<LocalMountDocument>> listImages(String uri) async =>
+      const <LocalMountDocument>[
+        LocalMountDocument(
+          uri: 'content://image/10',
+          name: '10.png',
+          mimeType: 'image/png',
+          size: 100,
+          lastModified: 20,
+          parentUri: 'content://folder/images',
+          relativeDir: '',
+          width: 900,
+          height: 1600,
+        ),
+        LocalMountDocument(
+          uri: 'content://image/2',
+          name: '2.png',
+          mimeType: 'image/png',
+          size: 90,
+          lastModified: 10,
+          parentUri: 'content://folder/images',
+          relativeDir: '',
+          width: 900,
+          height: 1500,
+        ),
+      ];
+
+  @override
+  Future<List<LocalArchiveEntry>> listZipEntries(
+    String uri,
+  ) async => const <LocalArchiveEntry>[
+    LocalArchiveEntry(name: 'page-10.jpg', size: 200, width: 800, height: 1400),
+    LocalArchiveEntry(name: 'page-2.jpg', size: 180, width: 800, height: 1300),
+  ];
+
+  @override
+  Future<Uint8List> readPage(String uri, {String? archiveEntry}) async =>
+      Uint8List.fromList(utf8.encode('$uri#${archiveEntry ?? ''}'));
 }
 
 final class _TestPlatformFile extends PlatformFile {

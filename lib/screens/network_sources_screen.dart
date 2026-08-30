@@ -5,6 +5,8 @@ import '../state/app_controller.dart';
 import '../theme.dart';
 import 'network_library_screen.dart';
 
+enum _SourceChoice { local, network }
+
 class NetworkSourcesScreen extends StatelessWidget {
   const NetworkSourcesScreen({required this.controller, super.key});
 
@@ -19,7 +21,7 @@ class NetworkSourcesScreen extends StatelessWidget {
           title: const Text('网络书库'),
           actions: <Widget>[
             IconButton(
-              tooltip: '添加网络书库',
+              tooltip: '添加书库',
               onPressed: () => _addSource(context),
               icon: const Icon(Icons.add_rounded),
             ),
@@ -78,7 +80,7 @@ class NetworkSourcesScreen extends StatelessWidget {
                       title: Text(source.name),
                       subtitle: Text(
                         '${_typeLabel(source.type)} · ${books.length} 本 · ${_statusLabel(source)}\n'
-                        '${source.endpoint}'
+                        '${source.type == NetworkSourceType.local ? source.rootPath : source.endpoint}'
                         '${source.lastError == null ? '' : '\n${source.lastError}'}',
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
@@ -98,23 +100,29 @@ class NetworkSourcesScreen extends StatelessWidget {
                           if (value == 'credentials') {
                             _reauthenticate(context, source);
                           }
+                          if (value == 'relink') _relink(context, source);
                           if (value == 'delete') _remove(context, source);
                         },
-                        itemBuilder: (context) =>
-                            const <PopupMenuEntry<String>>[
-                              PopupMenuItem(
-                                value: 'refresh',
-                                child: Text('重新扫描'),
-                              ),
-                              PopupMenuItem(
-                                value: 'credentials',
-                                child: Text('更新账号密码'),
-                              ),
-                              PopupMenuItem(
-                                value: 'delete',
-                                child: Text('移除挂载'),
-                              ),
-                            ],
+                        itemBuilder: (context) => <PopupMenuEntry<String>>[
+                          const PopupMenuItem(
+                            value: 'refresh',
+                            child: Text('重新扫描'),
+                          ),
+                          if (source.type != NetworkSourceType.local)
+                            const PopupMenuItem(
+                              value: 'credentials',
+                              child: Text('更新账号密码'),
+                            ),
+                          if (source.type == NetworkSourceType.local)
+                            const PopupMenuItem(
+                              value: 'relink',
+                              child: Text('重新选择原目录'),
+                            ),
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Text('移除挂载'),
+                          ),
+                        ],
                       ),
                     ),
                   );
@@ -123,7 +131,7 @@ class NetworkSourcesScreen extends StatelessWidget {
         floatingActionButton: controller.networkSources.isEmpty
             ? null
             : FloatingActionButton(
-                tooltip: '添加网络书库',
+                tooltip: '添加书库',
                 onPressed: () => _addSource(context),
                 child: const Icon(Icons.add_rounded),
               ),
@@ -132,6 +140,61 @@ class NetworkSourcesScreen extends StatelessWidget {
   }
 
   Future<void> _addSource(BuildContext context) async {
+    final choice = await showModalBottomSheet<_SourceChoice>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const ListTile(
+              leading: Icon(Icons.folder_open_rounded),
+              title: Text('挂载本地漫画目录'),
+              subtitle: Text('ZIP/CBZ 与图片文件夹原地直读，不复制原图'),
+              onTap: null,
+            ),
+            ListTile(
+              leading: const Icon(Icons.sd_storage_outlined),
+              title: const Text('选择手机、SD 卡或系统目录'),
+              onTap: () => Navigator.pop(context, _SourceChoice.local),
+            ),
+            ListTile(
+              leading: const Icon(Icons.cloud_outlined),
+              title: const Text('连接网络书库'),
+              subtitle: const Text('WebDAV、OPDS 或 SMB/NAS'),
+              onTap: () => Navigator.pop(context, _SourceChoice.network),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !context.mounted) return;
+    if (choice == _SourceChoice.local) {
+      try {
+        final source = await controller.mountLocalDirectory();
+        if (source != null && context.mounted) {
+          await Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => NetworkLibraryScreen(
+                controller: controller,
+                sourceId: source.id,
+              ),
+            ),
+          );
+        }
+      } catch (error) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('挂载失败：${_friendly(error)}')));
+        }
+      }
+      return;
+    }
+    await _addNetworkSource(context);
+  }
+
+  Future<void> _addNetworkSource(BuildContext context) async {
     final source = await Navigator.of(context).push<NetworkSource>(
       MaterialPageRoute<NetworkSource>(
         builder: (_) => _NetworkSourceForm(controller: controller),
@@ -169,7 +232,11 @@ class NetworkSourcesScreen extends StatelessWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('移除网络书库？'),
-        content: Text('将移除“${source.name}”的挂载与本地缓存。远程文件不会被修改或删除。'),
+        content: Text(
+          source.type == NetworkSourceType.local
+              ? '将移除“${source.name}”的授权与索引。原图和压缩包不会被修改或删除。'
+              : '将移除“${source.name}”的挂载与本地缓存。远程文件不会被修改或删除。',
+        ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -183,6 +250,23 @@ class NetworkSourcesScreen extends StatelessWidget {
       ),
     );
     if (confirmed == true) await controller.removeNetworkSource(source.id);
+  }
+
+  Future<void> _relink(BuildContext context, NetworkSource source) async {
+    try {
+      await controller.relinkLocalSource(source);
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('已重新关联原目录')));
+      }
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('重新关联失败：${_friendly(error)}')));
+      }
+    }
   }
 
   Future<void> _reauthenticate(
@@ -330,6 +414,7 @@ class _NetworkSourceFormState extends State<_NetworkSourceForm> {
               decoration: InputDecoration(
                 labelText: _type == NetworkSourceType.smb ? 'SMB 主机' : '服务地址',
                 hintText: switch (_type) {
+                  NetworkSourceType.local => '',
                   NetworkSourceType.webdav => 'https://example.com/dav',
                   NetworkSourceType.opds => 'https://example.com/opds',
                   NetworkSourceType.smb => 'smb://192.168.1.10',
@@ -477,18 +562,18 @@ class _EmptyNetworkLibrary extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 24),
-            Text('挂载你的网络书库', style: Theme.of(context).textTheme.headlineSmall),
+            Text('挂载你的漫画书库', style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 10),
             const Text(
-              '支持 WebDAV、OPDS/Komga/Kavita 和 SMB/NAS。远程文件只读，阅读记录只留在本机。',
+              '可原地挂载手机或 SD 卡的 ZIP/CBZ 与图片目录，也支持 WebDAV、OPDS 和 SMB/NAS。所有阅读记录都只留在本机。',
               textAlign: TextAlign.center,
               style: TextStyle(color: ShelfColors.muted, height: 1.55),
             ),
             const SizedBox(height: 26),
             FilledButton.icon(
               onPressed: onAdd,
-              icon: const Icon(Icons.add_link_rounded),
-              label: const Text('添加网络书库'),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('添加书库'),
             ),
           ],
         ),
@@ -498,12 +583,14 @@ class _EmptyNetworkLibrary extends StatelessWidget {
 }
 
 String _typeLabel(NetworkSourceType type) => switch (type) {
+  NetworkSourceType.local => '本地原地挂载',
   NetworkSourceType.webdav => 'WebDAV',
   NetworkSourceType.opds => 'OPDS',
   NetworkSourceType.smb => 'SMB/NAS',
 };
 
 IconData _sourceIcon(NetworkSourceType type) => switch (type) {
+  NetworkSourceType.local => Icons.folder_open_rounded,
   NetworkSourceType.webdav => Icons.cloud_outlined,
   NetworkSourceType.opds => Icons.rss_feed_rounded,
   NetworkSourceType.smb => Icons.dns_outlined,

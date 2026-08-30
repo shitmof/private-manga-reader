@@ -1058,7 +1058,12 @@ class LibraryRepository {
         await txn.insert('settings', row);
       }
       for (final row in networkSources) {
-        await txn.insert('network_sources', row);
+        final restored = <String, Object?>{...row};
+        if (restored['type'] == NetworkSourceType.local.name) {
+          restored['connection_state'] = NetworkConnectionState.unknown.name;
+          restored['last_error'] = '等待重新选择原目录';
+        }
+        await txn.insert('network_sources', restored);
       }
       for (final row in remoteBooks) {
         await txn.insert('remote_books', row);

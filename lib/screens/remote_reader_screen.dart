@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -110,24 +111,7 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
                         child: SizedBox(
                           width: width,
                           height: _displayHeight(page, width),
-                          child: Image.file(
-                            File(widget.controller.filePath(page.relativePath)),
-                            fit: BoxFit.contain,
-                            alignment: Alignment.topCenter,
-                            cacheWidth:
-                                (width * MediaQuery.devicePixelRatioOf(context))
-                                    .round()
-                                    .clamp(360, 2400),
-                            filterQuality: FilterQuality.medium,
-                            errorBuilder: (context, error, stackTrace) =>
-                                const Center(
-                                  child: Icon(
-                                    Icons.broken_image_outlined,
-                                    size: 42,
-                                    color: Colors.white54,
-                                  ),
-                                ),
-                          ),
+                          child: _pageImage(page, width),
                         ),
                       ),
                     );
@@ -137,10 +121,7 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
             _RemoteReaderTopBar(
               visible: _controlsVisible,
               title: book?.title ?? '网络漫画',
-              onBack: () async {
-                await _saveProgress();
-                if (context.mounted) Navigator.pop(context);
-              },
+              onBack: () => Navigator.of(context).pop(),
               onRestart: () => _scrollController.animateTo(
                 0,
                 duration: const Duration(milliseconds: 350),
@@ -237,16 +218,108 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
             minScale: 0.8,
             maxScale: 5,
             child: Center(
-              child: Image.file(
-                File(widget.controller.filePath(page.relativePath)),
-                fit: BoxFit.contain,
-              ),
+              child: _pageImage(page, MediaQuery.sizeOf(context).width),
             ),
           ),
         ),
       ),
     );
   }
+
+  Widget _pageImage(RemotePage page, double width) {
+    final cacheWidth = (width * MediaQuery.devicePixelRatioOf(context))
+        .round()
+        .clamp(360, 2400);
+    if (!page.isExternal) {
+      return Image.file(
+        File(widget.controller.filePath(page.relativePath)),
+        fit: BoxFit.contain,
+        alignment: Alignment.topCenter,
+        cacheWidth: cacheWidth,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: _imageError,
+      );
+    }
+    return _ExternalPageImage(
+      controller: widget.controller,
+      page: page,
+      cacheWidth: cacheWidth,
+    );
+  }
+
+  Widget _imageError(BuildContext context, Object? error, StackTrace? stack) =>
+      const Center(
+        child: Icon(
+          Icons.broken_image_outlined,
+          size: 42,
+          color: Colors.white54,
+        ),
+      );
+}
+
+class _ExternalPageImage extends StatefulWidget {
+  const _ExternalPageImage({
+    required this.controller,
+    required this.page,
+    required this.cacheWidth,
+  });
+
+  final AppController controller;
+  final RemotePage page;
+  final int cacheWidth;
+
+  @override
+  State<_ExternalPageImage> createState() => _ExternalPageImageState();
+}
+
+class _ExternalPageImageState extends State<_ExternalPageImage> {
+  late Future<Uint8List> _load = widget.controller.loadExternalPage(
+    widget.page,
+  );
+
+  @override
+  void didUpdateWidget(covariant _ExternalPageImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.page.id != widget.page.id) {
+      _load = widget.controller.loadExternalPage(widget.page);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Uint8List>(
+    future: _load,
+    builder: (context, snapshot) {
+      if (snapshot.hasError) {
+        return const Center(
+          child: Icon(
+            Icons.broken_image_outlined,
+            size: 42,
+            color: Colors.white54,
+          ),
+        );
+      }
+      final bytes = snapshot.data;
+      if (bytes == null) {
+        return const Center(
+          child: CircularProgressIndicator(color: Colors.white54),
+        );
+      }
+      return Image.memory(
+        bytes,
+        fit: BoxFit.contain,
+        alignment: Alignment.topCenter,
+        cacheWidth: widget.cacheWidth,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: (context, error, stackTrace) => const Center(
+          child: Icon(
+            Icons.broken_image_outlined,
+            size: 42,
+            color: Colors.white54,
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _RemoteReaderTopBar extends StatelessWidget {

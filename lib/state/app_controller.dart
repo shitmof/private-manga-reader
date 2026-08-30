@@ -1,5 +1,4 @@
 import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 
@@ -11,6 +10,7 @@ import '../services/comic_export_service.dart';
 import '../services/archive_import_service.dart';
 import '../services/import_service.dart';
 import '../services/incoming_archive_service.dart';
+import '../services/local_mount_service.dart';
 import '../services/network_library_service.dart';
 import '../services/privacy_service.dart';
 import '../services/storage_service.dart';
@@ -42,6 +42,7 @@ class AppController extends ChangeNotifier {
     this._networkLibrary, {
     PrivacyAuthenticator? privacyAuthenticator,
     this.incomingArchiveService,
+    this.localMountService,
   }) : _privacyAuthenticator =
            privacyAuthenticator ?? DevicePrivacyAuthenticator();
 
@@ -53,6 +54,7 @@ class AppController extends ChangeNotifier {
   final NetworkLibraryService _networkLibrary;
   final PrivacyAuthenticator _privacyAuthenticator;
   final IncomingArchiveService? incomingArchiveService;
+  final LocalMountService? localMountService;
   final StorageService storage;
 
   List<ComicSummary> library = const <ComicSummary>[];
@@ -165,6 +167,40 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  Future<NetworkSource?> mountLocalDirectory() async {
+    final service = localMountService;
+    if (service == null) throw UnsupportedError('当前平台不支持原地挂载');
+    final selection = await service.pickDirectory();
+    if (selection == null) return null;
+    operation = const OperationProgress(
+      title: '正在挂载本地漫画',
+      completed: 0,
+      total: 0,
+      detail: '只建立索引，不复制原图',
+    );
+    notifyListeners();
+    try {
+      final source = await _networkRepository.createSource(
+        name: selection.name,
+        type: NetworkSourceType.local,
+        endpoint: selection.uri,
+        rootPath: selection.name,
+        username: '',
+      );
+      try {
+        await service.discoverAndSave(source);
+        await _networkRepository.recordSourceSuccess(source.id, synced: true);
+      } catch (error) {
+        await _recordNetworkFailure(source.id, error);
+      }
+      await refreshNetworkLibrary(notify: false);
+      return source;
+    } finally {
+      operation = null;
+      notifyListeners();
+    }
+  }
+
   Future<void> scanNetworkSource(NetworkSource source) async {
     operation = const OperationProgress(
       title: '正在同步网络书库',
@@ -174,7 +210,13 @@ class AppController extends ChangeNotifier {
     );
     notifyListeners();
     try {
-      await _networkLibrary.discoverAndSave(source);
+      if (source.type == NetworkSourceType.local) {
+        final service = localMountService;
+        if (service == null) throw UnsupportedError('当前平台不支持原地挂载');
+        await service.discoverAndSave(source);
+      } else {
+        await _networkLibrary.discoverAndSave(source);
+      }
       await _networkRepository.recordSourceSuccess(source.id, synced: true);
       await refreshNetworkLibrary(notify: false);
     } catch (error) {
@@ -229,8 +271,52 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  Future<void> relinkLocalSource(NetworkSource source) async {
+    final service = localMountService;
+    if (service == null || source.type != NetworkSourceType.local) {
+      throw UnsupportedError('当前条目不支持重新授权');
+    }
+    final selection = await service.pickDirectory();
+    if (selection == null) return;
+    operation = const OperationProgress(
+      title: '正在重新关联本地目录',
+      completed: 0,
+      total: 0,
+      detail: '保留原有阅读进度与书签',
+    );
+    notifyListeners();
+    try {
+      final updated = NetworkSource(
+        id: source.id,
+        name: selection.name,
+        type: NetworkSourceType.local,
+        endpoint: selection.uri,
+        rootPath: selection.name,
+        username: '',
+        createdAt: source.createdAt,
+        updatedAt: DateTime.now().toUtc(),
+        connectionState: NetworkConnectionState.unknown,
+      );
+      await _networkRepository.updateSource(updated);
+      await service.discoverAndSave(updated);
+      await _networkRepository.recordSourceSuccess(source.id, synced: true);
+      await refreshNetworkLibrary(notify: false);
+    } catch (error) {
+      await _recordNetworkFailure(source.id, error);
+      await refreshNetworkLibrary(notify: false);
+      rethrow;
+    } finally {
+      operation = null;
+      notifyListeners();
+    }
+  }
+
   Future<List<RemotePage>> prepareRemoteBook(String bookId) async {
-    final sourceId = remoteBookFor(bookId)?.sourceId;
+    final book = remoteBookFor(bookId);
+    final sourceId = book?.sourceId;
+    final source = sourceId == null
+        ? null
+        : networkSources.where((item) => item.id == sourceId).firstOrNull;
     operation = const OperationProgress(
       title: '正在准备网络漫画',
       completed: 0,
@@ -239,18 +325,33 @@ class AppController extends ChangeNotifier {
     );
     notifyListeners();
     try {
-      await _networkLibrary.cacheBook(
-        bookId,
-        onProgress: (completed, total, detail) {
-          operation = OperationProgress(
-            title: '正在准备网络漫画',
-            completed: completed,
-            total: total,
-            detail: detail,
-          );
-          notifyListeners();
-        },
-      );
+      if (source?.type == NetworkSourceType.local) {
+        final service = localMountService;
+        if (service == null || book == null) {
+          throw UnsupportedError('当前平台不支持原地挂载');
+        }
+        operation = const OperationProgress(
+          title: '正在准备本地漫画',
+          completed: 0,
+          total: 0,
+          detail: '读取页面索引，不解压到私有目录',
+        );
+        notifyListeners();
+        await service.prepareBook(book);
+      } else {
+        await _networkLibrary.cacheBook(
+          bookId,
+          onProgress: (completed, total, detail) {
+            operation = OperationProgress(
+              title: '正在准备网络漫画',
+              completed: completed,
+              total: total,
+              detail: detail,
+            );
+            notifyListeners();
+          },
+        );
+      }
       if (sourceId != null) {
         await _networkRepository.recordSourceSuccess(sourceId, synced: false);
       }
@@ -270,6 +371,12 @@ class AppController extends ChangeNotifier {
 
   Future<List<RemotePage>> loadRemotePages(String bookId) =>
       _networkRepository.loadPages(bookId);
+
+  Future<Uint8List> loadExternalPage(RemotePage page) {
+    final service = localMountService;
+    if (service == null) throw UnsupportedError('当前平台不支持原地挂载');
+    return service.readPage(page);
+  }
 
   Future<void> saveRemoteProgress(
     String bookId,

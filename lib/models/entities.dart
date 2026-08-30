@@ -306,7 +306,7 @@ class ReaderPreferences {
 
 enum DuplicatePolicy { skip, keep }
 
-enum NetworkSourceType { webdav, opds, smb }
+enum NetworkSourceType { local, webdav, opds, smb }
 
 enum NetworkConnectionState {
   unknown,
@@ -436,6 +436,8 @@ class RemoteBook {
   final DateTime updatedAt;
 
   bool get isCached => pageCount > 0 && cachedVersion == etag;
+  bool get isExternalIndexed =>
+      pageCount > 0 && cachedVersion == 'external:$etag';
 
   factory RemoteBook.fromMap(Map<String, Object?> map) => RemoteBook(
     id: map['id']! as String,
@@ -470,6 +472,8 @@ class RemotePage {
     required this.byteSize,
     required this.width,
     required this.height,
+    this.sourceUri,
+    this.archiveEntry,
   });
 
   final String id;
@@ -480,6 +484,10 @@ class RemotePage {
   final int byteSize;
   final int width;
   final int height;
+  final String? sourceUri;
+  final String? archiveEntry;
+
+  bool get isExternal => sourceUri != null;
 
   factory RemotePage.fromMap(Map<String, Object?> map) => RemotePage(
     id: map['id']! as String,
@@ -490,6 +498,8 @@ class RemotePage {
     byteSize: map['byte_size']! as int,
     width: map['width']! as int,
     height: map['height']! as int,
+    sourceUri: map['source_uri'] as String?,
+    archiveEntry: map['archive_entry'] as String?,
   );
 }
 
