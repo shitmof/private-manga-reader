@@ -21,6 +21,7 @@ class EditorScreen extends StatefulWidget {
 }
 
 class _EditorScreenState extends State<EditorScreen> {
+  final ScrollController _scrollController = ScrollController();
   List<ComicItemRecord> _items = <ComicItemRecord>[];
   final Set<String> _removedIds = <String>{};
   final Set<String> _addedIds = <String>{};
@@ -36,6 +37,12 @@ class _EditorScreenState extends State<EditorScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _load({bool initial = true}) async {
@@ -91,6 +98,25 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
           centerTitle: true,
           actions: <Widget>[
+            PopupMenuButton<String>(
+              tooltip: '选择范围或全选',
+              enabled: !_saving && _items.isNotEmpty,
+              onSelected: (value) {
+                if (value == 'all') _toggleSelectAll();
+                if (value == 'range') _selectRange();
+              },
+              itemBuilder: (_) => <PopupMenuEntry<String>>[
+                PopupMenuItem(
+                  value: 'all',
+                  child: Text(
+                    _selectedItemIds.length == _items.length
+                        ? '取消全选'
+                        : '全选 ${_items.length} 张',
+                  ),
+                ),
+                const PopupMenuItem(value: 'range', child: Text('选择范围')),
+              ],
+            ),
             TextButton(
               onPressed: _saving ? null : _save,
               child: _saving
@@ -113,16 +139,23 @@ class _EditorScreenState extends State<EditorScreen> {
                   label: const Text('添加图片'),
                 ),
               )
-            : GridView.builder(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 108),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  crossAxisSpacing: 8,
-                  mainAxisSpacing: 8,
-                  childAspectRatio: 0.72,
+            : Scrollbar(
+                controller: _scrollController,
+                interactive: true,
+                thickness: 6,
+                radius: const Radius.circular(3),
+                child: GridView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 108),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                    childAspectRatio: 0.72,
+                  ),
+                  itemCount: _items.length,
+                  itemBuilder: (context, index) => _buildDraggableItem(index),
                 ),
-                itemCount: _items.length,
-                itemBuilder: (context, index) => _buildDraggableItem(index),
               ),
         bottomNavigationBar: _EditorToolbar(
           hasSelection: _selectedItemIds.isNotEmpty,
@@ -132,6 +165,7 @@ class _EditorScreenState extends State<EditorScreen> {
           onAdd: _addImages,
           onDelete: _deleteSelected,
           onCover: _setSelectedAsCover,
+          onMove: _moveSelected,
         ),
       ),
     );
@@ -217,6 +251,81 @@ class _EditorScreenState extends State<EditorScreen> {
 
   void _reverse() => setState(() => _items = _items.reversed.toList());
 
+  void _toggleSelectAll() => setState(() {
+    if (_selectedItemIds.length == _items.length) {
+      _selectedItemIds.clear();
+    } else {
+      _selectedItemIds
+        ..clear()
+        ..addAll(_items.map((item) => item.id));
+    }
+  });
+
+  Future<void> _selectRange() async {
+    var startText = '';
+    var endText = '';
+    final range = await showDialog<(int, int)>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('选择范围'),
+        content: Row(
+          children: <Widget>[
+            Expanded(
+              child: TextField(
+                key: const ValueKey<String>('range-start'),
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                onChanged: (value) => startText = value,
+                decoration: const InputDecoration(labelText: '起始页'),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 10),
+              child: Text('至'),
+            ),
+            Expanded(
+              child: TextField(
+                key: const ValueKey<String>('range-end'),
+                keyboardType: TextInputType.number,
+                onChanged: (value) => endText = value,
+                decoration: InputDecoration(
+                  labelText: '结束页',
+                  helperText: '最大 ${_items.length}',
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final start = int.tryParse(startText.trim());
+              final end = int.tryParse(endText.trim());
+              if (start != null &&
+                  end != null &&
+                  start >= 1 &&
+                  end >= start &&
+                  end <= _items.length) {
+                Navigator.pop(context, (start, end));
+              }
+            },
+            child: const Text('选中'),
+          ),
+        ],
+      ),
+    );
+    if (range == null || !mounted) return;
+    setState(() {
+      _selectedItemIds.addAll(
+        _items.sublist(range.$1 - 1, range.$2).map((item) => item.id),
+      );
+    });
+  }
+
   Future<void> _addImages() async {
     final before = _items.map((item) => item.id).toSet();
     final report = await runImportFlow(
@@ -266,6 +375,54 @@ class _EditorScreenState extends State<EditorScreen> {
       if (removed.any((item) => item.asset.id == _coverAssetId)) {
         _coverAssetId = null;
       }
+      _selectedItemIds.clear();
+    });
+  }
+
+  Future<void> _moveSelected() async {
+    if (_selectedItemIds.isEmpty) return;
+    var targetText = '';
+    final targetPage = await showDialog<int>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('移动到指定页'),
+        content: TextField(
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          onChanged: (value) => targetText = value,
+          decoration: InputDecoration(
+            labelText: '目标页码',
+            helperText: '可输入 1 到 ${_items.length}',
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = int.tryParse(targetText.trim());
+              if (value != null && value >= 1 && value <= _items.length) {
+                Navigator.pop(context, value);
+              }
+            },
+            child: const Text('移动'),
+          ),
+        ],
+      ),
+    );
+    if (targetPage == null || !mounted) return;
+    setState(() {
+      final moving = _items
+          .where((item) => _selectedItemIds.contains(item.id))
+          .toList(growable: false);
+      final remaining = _items
+          .where((item) => !_selectedItemIds.contains(item.id))
+          .toList();
+      final insertion = (targetPage - 1).clamp(0, remaining.length);
+      remaining.insertAll(insertion, moving);
+      _items = remaining;
       _selectedItemIds.clear();
     });
   }
@@ -413,6 +570,7 @@ class _EditorToolbar extends StatelessWidget {
     required this.onAdd,
     required this.onDelete,
     required this.onCover,
+    required this.onMove,
   });
 
   final bool hasSelection;
@@ -422,6 +580,7 @@ class _EditorToolbar extends StatelessWidget {
   final VoidCallback onAdd;
   final VoidCallback onDelete;
   final VoidCallback onCover;
+  final VoidCallback onMove;
 
   @override
   Widget build(BuildContext context) {
@@ -448,6 +607,11 @@ class _EditorToolbar extends StatelessWidget {
                 icon: Icons.add_rounded,
                 label: '添加',
                 onTap: canAdd ? onAdd : null,
+              ),
+              _Tool(
+                icon: Icons.low_priority_rounded,
+                label: '移动',
+                onTap: hasSelection ? onMove : null,
               ),
               _Tool(
                 icon: Icons.delete_outline_rounded,

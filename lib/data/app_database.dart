@@ -11,7 +11,7 @@ class AppDatabase {
   final DatabaseFactory _factory;
   final String? overridePath;
   Database? _database;
-  static const schemaVersion = 3;
+  static const schemaVersion = 5;
 
   Future<Database> get instance async {
     final existing = _database;
@@ -53,20 +53,28 @@ class AppDatabase {
         created_at TEXT NOT NULL
       )
     ''');
+    await _createShelfFolderSchema(db);
     await db.execute('''
       CREATE TABLE comics (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         cover_asset_id TEXT,
+        folder_id TEXT,
+        is_private INTEGER NOT NULL DEFAULT 0,
+        is_pinned INTEGER NOT NULL DEFAULT 0,
+        read_status TEXT NOT NULL DEFAULT 'unread',
+        last_read_at TEXT,
         sort_index INTEGER NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         last_read_position INTEGER NOT NULL DEFAULT 0,
         last_read_offset REAL NOT NULL DEFAULT 0,
         deleted_at TEXT,
-        FOREIGN KEY(cover_asset_id) REFERENCES assets(id) ON DELETE SET NULL
+        FOREIGN KEY(cover_asset_id) REFERENCES assets(id) ON DELETE SET NULL,
+        FOREIGN KEY(folder_id) REFERENCES shelf_folders(id) ON DELETE SET NULL
       )
     ''');
+    await db.execute('CREATE INDEX idx_comics_folder ON comics(folder_id)');
     await db.execute('''
       CREATE TABLE comic_items (
         id TEXT PRIMARY KEY,
@@ -82,6 +90,8 @@ class AppDatabase {
       'CREATE INDEX idx_items_comic_position ON comic_items(comic_id, position)',
     );
     await db.execute('CREATE INDEX idx_items_asset ON comic_items(asset_id)');
+    await _createBookmarkSchema(db);
+    await _createReadingListSchema(db);
     await db.execute('''
       CREATE TABLE settings (
         key TEXT PRIMARY KEY,
@@ -102,6 +112,102 @@ class AppDatabase {
     if (oldVersion < 3) {
       await _createNetworkSchema(db);
     }
+    if (oldVersion < 4) {
+      await _createShelfFolderSchema(db);
+      await db.execute(
+        'ALTER TABLE comics ADD COLUMN folder_id TEXT REFERENCES shelf_folders(id) ON DELETE SET NULL',
+      );
+      await db.execute(
+        'ALTER TABLE comics ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0',
+      );
+      await db.execute(
+        'ALTER TABLE comics ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0',
+      );
+      await db.execute(
+        "ALTER TABLE comics ADD COLUMN read_status TEXT NOT NULL DEFAULT 'unread'",
+      );
+      await db.execute('ALTER TABLE comics ADD COLUMN last_read_at TEXT');
+      await db.execute('CREATE INDEX idx_comics_folder ON comics(folder_id)');
+      await _createBookmarkSchema(db);
+      await _createReadingListSchema(db);
+    }
+    if (oldVersion >= 4 && oldVersion < 5) {
+      await db.execute(
+        'ALTER TABLE shelf_folders ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0',
+      );
+    }
+    if (oldVersion >= 3 && oldVersion < 5) {
+      await db.execute(
+        "ALTER TABLE network_sources ADD COLUMN connection_state TEXT NOT NULL DEFAULT 'unknown'",
+      );
+      await db.execute(
+        'ALTER TABLE network_sources ADD COLUMN last_success_at TEXT',
+      );
+      await db.execute(
+        'ALTER TABLE network_sources ADD COLUMN last_sync_at TEXT',
+      );
+      await db.execute(
+        'ALTER TABLE network_sources ADD COLUMN last_error TEXT',
+      );
+    }
+  }
+
+  Future<void> _createShelfFolderSchema(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS shelf_folders (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        is_private INTEGER NOT NULL DEFAULT 0,
+        sort_index INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _createBookmarkSchema(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS page_bookmarks (
+        id TEXT PRIMARY KEY,
+        comic_id TEXT NOT NULL,
+        item_id TEXT NOT NULL UNIQUE,
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(comic_id) REFERENCES comics(id) ON DELETE CASCADE,
+        FOREIGN KEY(item_id) REFERENCES comic_items(id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_bookmarks_comic ON page_bookmarks(comic_id, created_at)',
+    );
+  }
+
+  Future<void> _createReadingListSchema(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS reading_lists (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        sort_index INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS reading_list_items (
+        list_id TEXT NOT NULL,
+        comic_id TEXT NOT NULL,
+        sort_index INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(list_id, comic_id),
+        FOREIGN KEY(list_id) REFERENCES reading_lists(id) ON DELETE CASCADE,
+        FOREIGN KEY(comic_id) REFERENCES comics(id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_reading_list_items_sort '
+      'ON reading_list_items(list_id, sort_index)',
+    );
   }
 
   Future<void> _createNetworkSchema(DatabaseExecutor db) async {
@@ -113,6 +219,10 @@ class AppDatabase {
         endpoint TEXT NOT NULL,
         root_path TEXT NOT NULL,
         username TEXT NOT NULL DEFAULT '',
+        connection_state TEXT NOT NULL DEFAULT 'unknown',
+        last_success_at TEXT,
+        last_sync_at TEXT,
+        last_error TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )

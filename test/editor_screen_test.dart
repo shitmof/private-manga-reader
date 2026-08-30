@@ -267,6 +267,63 @@ void main() {
       semantics.dispose();
     }
   });
+
+  testWidgets('多选图片可整块移动到指定页并保存', (tester) async {
+    final semantics = tester.ensureSemantics();
+    _setPhoneView(tester);
+    try {
+      await _openEditor(tester, controller, comic);
+      await tester.tap(_pageSelector('第 1 张'));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(_pageSelector('第 3 张'));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      await tester.tap(find.text('移动'));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.text('移动到指定页'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), '2');
+      await tester.tap(find.widgetWithText(FilledButton, '移动'));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      await _saveAndWait(tester);
+      final savedItems = (await tester.runAsync(
+        () => repository.loadItems(comic.id),
+      ))!;
+      expect(
+        savedItems.map((item) => item.asset.originalFileName).toList(),
+        <String>['2.png', '1.png', '3.png'],
+      );
+    } finally {
+      await _releaseWidgetTree(tester);
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('可按页码范围快速选中多张图片', (tester) async {
+    final semantics = tester.ensureSemantics();
+    _setPhoneView(tester);
+    try {
+      await _openEditor(tester, controller, comic);
+      await tester.tap(find.byTooltip('选择范围或全选'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PopupMenuItem<String>, '选择范围'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('range-start')),
+        '1',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('range-end')),
+        '2',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, '选中'));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.text('已选择 2 张'), findsOneWidget);
+    } finally {
+      await _releaseWidgetTree(tester);
+      semantics.dispose();
+    }
+  });
 }
 
 void _setPhoneView(WidgetTester tester) {
@@ -278,8 +335,7 @@ void _setPhoneView(WidgetTester tester) {
 
 Finder _pageSelector(String label) => find.byWidgetPredicate(
   (widget) =>
-      widget is Semantics &&
-      widget.properties.label == '$label，未选择，点按选择',
+      widget is Semantics && widget.properties.label == '$label，未选择，点按选择',
   description: '$label 的选择入口',
 );
 

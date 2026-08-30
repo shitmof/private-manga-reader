@@ -7,9 +7,12 @@ import '../data/library_repository.dart';
 import '../data/network_repository.dart';
 import '../models/entities.dart';
 import '../services/backup_service.dart';
+import '../services/comic_export_service.dart';
 import '../services/archive_import_service.dart';
 import '../services/import_service.dart';
+import '../services/incoming_archive_service.dart';
 import '../services/network_library_service.dart';
+import '../services/privacy_service.dart';
 import '../services/storage_service.dart';
 
 class OperationProgress {
@@ -36,8 +39,11 @@ class AppController extends ChangeNotifier {
     this._archiveImporter,
     this._backup,
     this._networkRepository,
-    this._networkLibrary,
-  );
+    this._networkLibrary, {
+    PrivacyAuthenticator? privacyAuthenticator,
+    this.incomingArchiveService,
+  }) : _privacyAuthenticator =
+           privacyAuthenticator ?? DevicePrivacyAuthenticator();
 
   final LibraryRepository _repository;
   final ImportService _importer;
@@ -45,9 +51,13 @@ class AppController extends ChangeNotifier {
   final BackupService _backup;
   final NetworkRepository _networkRepository;
   final NetworkLibraryService _networkLibrary;
+  final PrivacyAuthenticator _privacyAuthenticator;
+  final IncomingArchiveService? incomingArchiveService;
   final StorageService storage;
 
   List<ComicSummary> library = const <ComicSummary>[];
+  List<ShelfFolder> folders = const <ShelfFolder>[];
+  List<ReadingList> readingLists = const <ReadingList>[];
   List<NetworkSource> networkSources = const <NetworkSource>[];
   Map<String, List<RemoteBook>> networkBooks =
       const <String, List<RemoteBook>>{};
@@ -55,14 +65,29 @@ class AppController extends ChangeNotifier {
   OperationProgress? operation;
 
   Future<void> initialize() async {
+    await incomingArchiveService?.initialize();
+    incomingArchiveService?.addListener(_handleIncomingArchive);
     preferences = await _repository.loadPreferences();
-    library = await _repository.loadLibrary();
+    await _refreshLocalLibrary();
     await refreshNetworkLibrary(notify: false);
   }
 
+  bool get hasIncomingArchives => incomingArchiveService?.hasPending ?? false;
+
+  List<PlatformFile> takeIncomingArchives() =>
+      incomingArchiveService?.takePending() ?? const <PlatformFile>[];
+
+  void _handleIncomingArchive() => notifyListeners();
+
   Future<void> refresh() async {
-    library = await _repository.loadLibrary();
+    await _refreshLocalLibrary();
     notifyListeners();
+  }
+
+  Future<void> _refreshLocalLibrary() async {
+    library = await _repository.loadLibrary();
+    folders = await _repository.loadFolders();
+    readingLists = await _repository.loadReadingLists();
   }
 
   Future<void> refreshNetworkLibrary({bool notify = true}) async {
@@ -124,9 +149,11 @@ class AppController extends ChangeNotifier {
       await _networkLibrary.saveCredentials(source.id, credentials);
       try {
         await _networkLibrary.discoverAndSave(source);
-      } catch (_) {
+        await _networkRepository.recordSourceSuccess(source.id, synced: true);
+      } catch (error) {
         // The mount remains saved if the first full scan fails; the user can
         // retry without re-entering credentials.
+        await _recordNetworkFailure(source.id, error);
       }
       await refreshNetworkLibrary(notify: false);
       return source;
@@ -146,7 +173,12 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       await _networkLibrary.discoverAndSave(source);
+      await _networkRepository.recordSourceSuccess(source.id, synced: true);
       await refreshNetworkLibrary(notify: false);
+    } catch (error) {
+      await _recordNetworkFailure(source.id, error);
+      await refreshNetworkLibrary(notify: false);
+      rethrow;
     } finally {
       operation = null;
       notifyListeners();
@@ -174,12 +206,21 @@ class AppController extends ChangeNotifier {
         username: credentials.username,
         createdAt: source.createdAt,
         updatedAt: DateTime.now().toUtc(),
+        connectionState: source.connectionState,
+        lastSuccessAt: source.lastSuccessAt,
+        lastSyncAt: source.lastSyncAt,
+        lastError: source.lastError,
       );
       await _networkLibrary.testConnection(updated, credentials);
       await _networkRepository.updateSource(updated);
       await _networkLibrary.saveCredentials(source.id, credentials);
       await _networkLibrary.discoverAndSave(updated);
+      await _networkRepository.recordSourceSuccess(source.id, synced: true);
       await refreshNetworkLibrary(notify: false);
+    } catch (error) {
+      await _recordNetworkFailure(source.id, error);
+      await refreshNetworkLibrary(notify: false);
+      rethrow;
     } finally {
       operation = null;
       notifyListeners();
@@ -187,6 +228,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<List<RemotePage>> prepareRemoteBook(String bookId) async {
+    final sourceId = remoteBookFor(bookId)?.sourceId;
     operation = const OperationProgress(
       title: '正在准备网络漫画',
       completed: 0,
@@ -207,8 +249,17 @@ class AppController extends ChangeNotifier {
           notifyListeners();
         },
       );
+      if (sourceId != null) {
+        await _networkRepository.recordSourceSuccess(sourceId, synced: false);
+      }
       await refreshNetworkLibrary(notify: false);
       return _networkRepository.loadPages(bookId);
+    } catch (error) {
+      if (sourceId != null) {
+        await _recordNetworkFailure(sourceId, error);
+        await refreshNetworkLibrary(notify: false);
+      }
+      rethrow;
     } finally {
       operation = null;
       notifyListeners();
@@ -243,6 +294,38 @@ class AppController extends ChangeNotifier {
 
   Future<int> networkCacheBytes() => storage.networkCacheBytes();
 
+  Future<void> _recordNetworkFailure(String sourceId, Object error) =>
+      _networkRepository.recordSourceFailure(
+        sourceId,
+        state: _networkStateFor(error),
+        error: _networkErrorMessage(error),
+      );
+
+  NetworkConnectionState _networkStateFor(Object error) {
+    final message = error.toString().toLowerCase();
+    if (message.contains('401') ||
+        message.contains('403') ||
+        message.contains('auth') ||
+        message.contains('凭据') ||
+        message.contains('密码') ||
+        message.contains('未授权')) {
+      return NetworkConnectionState.needsAuthentication;
+    }
+    if (error is SocketException ||
+        message.contains('offline') ||
+        message.contains('网络不可用')) {
+      return NetworkConnectionState.offline;
+    }
+    return NetworkConnectionState.unreachable;
+  }
+
+  String _networkErrorMessage(Object error) => error
+      .toString()
+      .replaceFirst('FormatException: ', '')
+      .replaceFirst('Bad state: ', '')
+      .replaceFirst('FileSystemException: ', '')
+      .trim();
+
   ComicSummary? summaryFor(String comicId) {
     for (final summary in library) {
       if (summary.comic.id == comicId) return summary;
@@ -262,6 +345,86 @@ class AppController extends ChangeNotifier {
     await _repository.renameComic(comicId, title);
     await refresh();
   }
+
+  Future<ShelfFolder> createFolder(String name) async {
+    final folder = await _repository.createFolder(name);
+    await refresh();
+    return folder;
+  }
+
+  Future<void> renameFolder(String folderId, String name) async {
+    await _repository.renameFolder(folderId, name);
+    await refresh();
+  }
+
+  Future<void> deleteFolder(String folderId) async {
+    await _repository.deleteFolder(folderId);
+    await refresh();
+  }
+
+  Future<void> setFolderPrivate(String folderId, bool value) async {
+    await _repository.setFolderPrivate(folderId, value);
+    await refresh();
+  }
+
+  Future<void> moveComicsToFolder(
+    Iterable<String> comicIds,
+    String? folderId,
+  ) async {
+    await _repository.moveComicsToFolder(comicIds.toList(), folderId);
+    await refresh();
+  }
+
+  Future<void> setComicsPrivate(Iterable<String> comicIds, bool value) async {
+    for (final comicId in comicIds) {
+      await _repository.setComicPrivate(comicId, value);
+    }
+    await refresh();
+  }
+
+  Future<bool> unlockPrivateShelf() =>
+      _privacyAuthenticator.authenticate(reason: '验证身份以打开私密书架');
+
+  Future<void> setComicsPinned(Iterable<String> comicIds, bool value) async {
+    for (final comicId in comicIds) {
+      await _repository.setComicPinned(comicId, value);
+    }
+    await refresh();
+  }
+
+  Future<ReadingList> createReadingList(String name) async {
+    final list = await _repository.createReadingList(name);
+    await refresh();
+    return list;
+  }
+
+  Future<void> addComicsToReadingList(
+    String listId,
+    Iterable<String> comicIds,
+  ) async {
+    await _repository.addComicsToReadingList(listId, comicIds.toList());
+    await refresh();
+  }
+
+  Future<List<String>> loadReadingListComicIds(String listId) =>
+      _repository.loadReadingListComicIds(listId);
+
+  Future<void> deleteReadingList(String listId) async {
+    await _repository.deleteReadingList(listId);
+    await refresh();
+  }
+
+  Future<List<PageBookmark>> loadBookmarks(String comicId) =>
+      _repository.loadBookmarks(comicId);
+
+  Future<PageBookmark> saveBookmark({
+    required String comicId,
+    required String itemId,
+    String note = '',
+  }) => _repository.saveBookmark(comicId: comicId, itemId: itemId, note: note);
+
+  Future<void> deleteBookmark(String bookmarkId) =>
+      _repository.deleteBookmark(bookmarkId);
 
   Future<void> deleteComic(String comicId) async {
     await _repository.deleteComic(comicId);
@@ -479,7 +642,7 @@ class AppController extends ChangeNotifier {
     return assets.length;
   }
 
-  Future<File> createAndShareBackup() async {
+  Future<(File, Uri?)> createAndExportBackup() async {
     operation = const OperationProgress(
       title: '正在创建完整备份',
       completed: 0,
@@ -491,8 +654,8 @@ class AppController extends ChangeNotifier {
       final file = await _backup.createBackup();
       operation = null;
       notifyListeners();
-      await _backup.shareBackup(file);
-      return file;
+      final destination = await _backup.saveBackupExternally(file);
+      return (file, destination);
     } finally {
       operation = null;
       notifyListeners();
@@ -519,4 +682,26 @@ class AppController extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  Future<ComicExportResult> createComicExport(String comicId) async {
+    operation = const OperationProgress(
+      title: '正在生成 CBZ',
+      completed: 0,
+      total: 0,
+      detail: '保留编辑后顺序和原图字节',
+    );
+    notifyListeners();
+    try {
+      return await ComicExportService(_repository, storage).createCbz(comicId);
+    } finally {
+      operation = null;
+      notifyListeners();
+    }
+  }
+
+  Future<Uri?> saveComicExport(ComicExportResult export) =>
+      ComicExportService(_repository, storage).saveExternally(export);
+
+  Future<void> shareComicExport(ComicExportResult export) =>
+      ComicExportService(_repository, storage).share(export);
 }

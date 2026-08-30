@@ -46,15 +46,41 @@ class NetworkSourcesScreen extends StatelessWidget {
                           color: ShelfColors.blueSoft,
                           borderRadius: BorderRadius.circular(13),
                         ),
-                        child: Icon(
-                          _sourceIcon(source.type),
-                          color: ShelfColors.blue,
+                        child: Stack(
+                          children: <Widget>[
+                            Center(
+                              child: Icon(
+                                _sourceIcon(source.type),
+                                color: ShelfColors.blue,
+                              ),
+                            ),
+                            Positioned(
+                              right: 2,
+                              bottom: 2,
+                              child: Container(
+                                width: 9,
+                                height: 9,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: _statusColor(source.connectionState),
+                                  border: Border.all(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.surface,
+                                    width: 1.5,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       title: Text(source.name),
                       subtitle: Text(
-                        '${_typeLabel(source.type)} · ${books.length} 本\n${source.endpoint}',
-                        maxLines: 2,
+                        '${_typeLabel(source.type)} · ${books.length} 本 · ${_statusLabel(source)}\n'
+                        '${source.endpoint}'
+                        '${source.lastError == null ? '' : '\n${source.lastError}'}',
+                        maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                       ),
                       isThreeLine: true,
@@ -163,9 +189,9 @@ class NetworkSourcesScreen extends StatelessWidget {
     BuildContext context,
     NetworkSource source,
   ) async {
-    final username = TextEditingController(text: source.username);
-    final password = TextEditingController();
-    final domain = TextEditingController();
+    var username = source.username;
+    var password = '';
+    var domain = '';
     final credentials = await showDialog<NetworkCredentials>(
       context: context,
       builder: (context) => AlertDialog(
@@ -173,20 +199,21 @@ class NetworkSourcesScreen extends StatelessWidget {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            TextField(
-              controller: username,
+            TextFormField(
+              initialValue: username,
+              onChanged: (value) => username = value,
               decoration: const InputDecoration(labelText: '用户名'),
             ),
             const SizedBox(height: 12),
             TextField(
-              controller: password,
+              onChanged: (value) => password = value,
               obscureText: true,
               decoration: const InputDecoration(labelText: '密码'),
             ),
             if (source.type == NetworkSourceType.smb) ...<Widget>[
               const SizedBox(height: 12),
               TextField(
-                controller: domain,
+                onChanged: (value) => domain = value,
                 decoration: const InputDecoration(labelText: '域（可选）'),
               ),
             ],
@@ -201,9 +228,9 @@ class NetworkSourcesScreen extends StatelessWidget {
             onPressed: () => Navigator.pop(
               context,
               NetworkCredentials(
-                username: username.text.trim(),
-                password: password.text,
-                domain: domain.text.trim(),
+                username: username.trim(),
+                password: password,
+                domain: domain.trim(),
               ),
             ),
             child: const Text('验证并保存'),
@@ -211,9 +238,6 @@ class NetworkSourcesScreen extends StatelessWidget {
         ],
       ),
     );
-    username.dispose();
-    password.dispose();
-    domain.dispose();
     if (credentials == null) return;
     try {
       await controller.reauthenticateNetworkSource(source, credentials);
@@ -489,3 +513,26 @@ String _friendly(Object error) => error
     .toString()
     .replaceFirst('FormatException: ', '')
     .replaceFirst('Bad state: ', '');
+
+String _statusLabel(NetworkSource source) {
+  final state = switch (source.connectionState) {
+    NetworkConnectionState.unknown => '待检查',
+    NetworkConnectionState.connected => '已连接',
+    NetworkConnectionState.needsAuthentication => '需重新登录',
+    NetworkConnectionState.offline => '网络离线',
+    NetworkConnectionState.unreachable => '暂时不可达',
+  };
+  final last = source.lastSuccessAt;
+  if (last == null) return state;
+  final local = last.toLocal();
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '$state · ${two(local.month)}-${two(local.day)} ${two(local.hour)}:${two(local.minute)}';
+}
+
+Color _statusColor(NetworkConnectionState state) => switch (state) {
+  NetworkConnectionState.connected => const Color(0xFF22A06B),
+  NetworkConnectionState.needsAuthentication => const Color(0xFFE08022),
+  NetworkConnectionState.offline ||
+  NetworkConnectionState.unreachable => const Color(0xFFD94C4C),
+  NetworkConnectionState.unknown => ShelfColors.muted,
+};

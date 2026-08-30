@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:archive/archive_io.dart';
 import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
@@ -18,6 +19,9 @@ class BackupService {
   static const _uuid = Uuid();
   final LibraryRepository _repository;
   final StorageService _storage;
+  static const MethodChannel _documentsChannel = MethodChannel(
+    'private_manga_reader/documents',
+  );
 
   Future<File> createBackup({String prefix = 'private-shelf'}) async {
     final stamp = _timestamp(DateTime.now());
@@ -66,6 +70,27 @@ class BackupService {
     );
   }
 
+  /// 通过系统文档选择器写出，可选手机、SD 卡或云盘。
+  /// 文件不再位于 App 私有目录，卸载后仍然保留。
+  Future<Uri?> saveBackupExternally(File backup) async {
+    final fileName = p.basename(backup.path);
+    if (Platform.isAndroid) {
+      final uri = await _documentsChannel.invokeMethod<String>(
+        'saveFile',
+        <String, Object?>{'sourcePath': backup.path, 'fileName': fileName},
+      );
+      return uri == null ? null : Uri.parse(uri);
+    }
+    return FilePicker.saveFile(
+      fileName: fileName,
+      bytes: await backup.readAsBytes(),
+      mimeType: 'application/zip',
+      dialogTitle: '保存完整备份',
+      type: FileType.custom,
+      allowedExtensions: const <String>['mangabackup'],
+    );
+  }
+
   Future<PlatformFile?> pickBackup() => FilePicker.pickFile(
     type: FileType.custom,
     allowedExtensions: const <String>['mangabackup', 'zip'],
@@ -102,7 +127,9 @@ class BackupService {
         (key, value) => MapEntry(key.toString(), value),
       );
       if (manifest['format'] != 'private-manga-reader-backup' ||
-          (manifest['version'] != 1 && manifest['version'] != 2)) {
+          (manifest['version'] != 1 &&
+              manifest['version'] != 2 &&
+              manifest['version'] != 3)) {
         throw const FormatException('不支持的备份版本');
       }
       final assets = _assetRows(manifest['assets']);
@@ -129,7 +156,7 @@ class BackupService {
         }
       }
       await _repository.replaceFromManifest(manifest);
-      if (manifest['version'] == 2) {
+      if (manifest['version'] == 2 || manifest['version'] == 3) {
         if (await _storage.networkCacheDirectory.exists()) {
           await _storage.networkCacheDirectory.delete(recursive: true);
         }

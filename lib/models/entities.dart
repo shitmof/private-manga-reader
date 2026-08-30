@@ -1,5 +1,7 @@
 enum AppThemePreference { system, light, dark }
 
+enum ReadingStatus { unread, reading, completed, paused }
+
 class Comic {
   const Comic({
     required this.id,
@@ -10,12 +12,22 @@ class Comic {
     required this.lastReadPosition,
     required this.lastReadOffset,
     this.coverAssetId,
+    this.folderId,
+    this.isPrivate = false,
+    this.isPinned = false,
+    this.readingStatus = ReadingStatus.unread,
+    this.lastReadAt,
     this.deletedAt,
   });
 
   final String id;
   final String title;
   final String? coverAssetId;
+  final String? folderId;
+  final bool isPrivate;
+  final bool isPinned;
+  final ReadingStatus readingStatus;
+  final DateTime? lastReadAt;
   final int sortIndex;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -27,6 +39,16 @@ class Comic {
     id: map['id']! as String,
     title: map['title']! as String,
     coverAssetId: map['cover_asset_id'] as String?,
+    folderId: map['folder_id'] as String?,
+    isPrivate: ((map['is_private'] as int?) ?? 0) == 1,
+    isPinned: ((map['is_pinned'] as int?) ?? 0) == 1,
+    readingStatus: ReadingStatus.values.firstWhere(
+      (value) => value.name == (map['read_status'] as String? ?? 'unread'),
+      orElse: () => ReadingStatus.unread,
+    ),
+    lastReadAt: map['last_read_at'] == null
+        ? null
+        : DateTime.parse(map['last_read_at']! as String),
     sortIndex: map['sort_index']! as int,
     createdAt: DateTime.parse(map['created_at']! as String),
     updatedAt: DateTime.parse(map['updated_at']! as String),
@@ -35,6 +57,87 @@ class Comic {
     deletedAt: map['deleted_at'] == null
         ? null
         : DateTime.parse(map['deleted_at']! as String),
+  );
+}
+
+class ShelfFolder {
+  const ShelfFolder({
+    required this.id,
+    required this.name,
+    required this.sortIndex,
+    required this.createdAt,
+    required this.updatedAt,
+    this.isPrivate = false,
+  });
+
+  final String id;
+  final String name;
+  final int sortIndex;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final bool isPrivate;
+
+  factory ShelfFolder.fromMap(Map<String, Object?> map) => ShelfFolder(
+    id: map['id']! as String,
+    name: map['name']! as String,
+    sortIndex: map['sort_index']! as int,
+    createdAt: DateTime.parse(map['created_at']! as String),
+    updatedAt: DateTime.parse(map['updated_at']! as String),
+    isPrivate: ((map['is_private'] as int?) ?? 0) == 1,
+  );
+}
+
+class PageBookmark {
+  const PageBookmark({
+    required this.id,
+    required this.comicId,
+    required this.itemId,
+    required this.position,
+    required this.note,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String comicId;
+  final String itemId;
+  final int position;
+  final String note;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  factory PageBookmark.fromMap(Map<String, Object?> map) => PageBookmark(
+    id: map['id']! as String,
+    comicId: map['comic_id']! as String,
+    itemId: map['item_id']! as String,
+    position: (map['position'] as int?) ?? 0,
+    note: map['note']! as String,
+    createdAt: DateTime.parse(map['created_at']! as String),
+    updatedAt: DateTime.parse(map['updated_at']! as String),
+  );
+}
+
+class ReadingList {
+  const ReadingList({
+    required this.id,
+    required this.name,
+    required this.sortIndex,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String name;
+  final int sortIndex;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  factory ReadingList.fromMap(Map<String, Object?> map) => ReadingList(
+    id: map['id']! as String,
+    name: map['name']! as String,
+    sortIndex: map['sort_index']! as int,
+    createdAt: DateTime.parse(map['created_at']! as String),
+    updatedAt: DateTime.parse(map['updated_at']! as String),
   );
 }
 
@@ -151,23 +254,27 @@ class ReaderPreferences {
     this.imageGap = 10,
     this.showPageNumber = true,
     this.rememberProgress = true,
+    this.readerBrightness = 0.72,
     this.theme = AppThemePreference.system,
   });
 
   final double imageGap;
   final bool showPageNumber;
   final bool rememberProgress;
+  final double readerBrightness;
   final AppThemePreference theme;
 
   ReaderPreferences copyWith({
     double? imageGap,
     bool? showPageNumber,
     bool? rememberProgress,
+    double? readerBrightness,
     AppThemePreference? theme,
   }) => ReaderPreferences(
     imageGap: imageGap ?? this.imageGap,
     showPageNumber: showPageNumber ?? this.showPageNumber,
     rememberProgress: rememberProgress ?? this.rememberProgress,
+    readerBrightness: readerBrightness ?? this.readerBrightness,
     theme: theme ?? this.theme,
   );
 }
@@ -175,6 +282,14 @@ class ReaderPreferences {
 enum DuplicatePolicy { skip, keep }
 
 enum NetworkSourceType { webdav, opds, smb }
+
+enum NetworkConnectionState {
+  unknown,
+  connected,
+  needsAuthentication,
+  offline,
+  unreachable,
+}
 
 class NetworkSource {
   const NetworkSource({
@@ -186,6 +301,10 @@ class NetworkSource {
     required this.username,
     required this.createdAt,
     required this.updatedAt,
+    this.connectionState = NetworkConnectionState.unknown,
+    this.lastSuccessAt,
+    this.lastSyncAt,
+    this.lastError,
   });
 
   final String id;
@@ -196,6 +315,10 @@ class NetworkSource {
   final String username;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final NetworkConnectionState connectionState;
+  final DateTime? lastSuccessAt;
+  final DateTime? lastSyncAt;
+  final String? lastError;
 
   factory NetworkSource.fromMap(Map<String, Object?> map) => NetworkSource(
     id: map['id']! as String,
@@ -206,6 +329,17 @@ class NetworkSource {
     username: map['username']! as String,
     createdAt: DateTime.parse(map['created_at']! as String),
     updatedAt: DateTime.parse(map['updated_at']! as String),
+    connectionState: NetworkConnectionState.values.firstWhere(
+      (value) => value.name == map['connection_state'],
+      orElse: () => NetworkConnectionState.unknown,
+    ),
+    lastSuccessAt: map['last_success_at'] == null
+        ? null
+        : DateTime.parse(map['last_success_at']! as String),
+    lastSyncAt: map['last_sync_at'] == null
+        ? null
+        : DateTime.parse(map['last_sync_at']! as String),
+    lastError: map['last_error'] as String?,
   );
 }
 

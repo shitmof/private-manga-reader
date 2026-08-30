@@ -7,21 +7,26 @@
 ## 已实现
 
 - 书架、漫画详情、三列编辑网格、沉浸式连续阅读和设置中心
+- 三列书架、文件夹分组、拖入分组、置顶、书单、搜索与私密书架
 - 从系统相册或文件选择器批量导入，保留选择顺序
 - 整包导入 CBZ/ZIP、CBR/RAR、CB7/7z、CBT/TAR；读取 `ComicInfo.xml`，按作者目录与数字自然顺序建册
 - 多个压缩包按系统选择队列依次解压；后一包始终追加在前一包末尾
 - App 不设单批 100 张限制；可连续追加，单本统一上限为 1000 张
 - 导入原图不压缩、不重编码；复制后再次计算 SHA-256 校验
 - 相同内容只物理保存一份，同一本或不同漫画可多次引用
-- 单本最多 1000 张；支持拖动、正序、倒序、追加、删除引用和独立封面
+- 单本最多 1000 张；支持单选、多选、全选、范围选择、批量删除、块移动、页码移动与独立封面
 - 逐项导入、失败项报告与原选择项直接重试
 - 导入前估算体积，Android 实机检查私有目录所在磁盘的可用空间
 - 永久原图与可清理、可重建的缩略图缓存分离
-- 懒加载纵向阅读、横图完整显示、双击放大和阅读位置恢复
+- 懒加载纵向阅读、横图完整显示、双击放大、阅读亮度、页面书签和阅读位置恢复
+- 阅读器右侧可拖动快速定位条与底部页码滑块，600～1000 页也可直接跳转
 - 漫画自定义拖动排序、浅色/深色/跟随系统主题
-- 完整 `.mangabackup` 备份与恢复；恢复前自动创建安全回退备份
+- 完整 `.mangabackup` 备份与恢复；可通过系统文档选择器保存到手机、SD 卡或云盘，卸载后仍可找回
 - 漫画移入回收站、恢复、永久删除；页面多选删除与无引用原图清理彼此分离
 - 只读挂载 WebDAV、OPDS/Komga/Kavita、SMB/NAS；网络缓存可清，阅读进度留在本机
+- 挂载记录连接状态、最后成功/同步时间、脱敏错误和重新认证入口
+- Android 文件关联：在文件管理器点击 CBZ/ZIP/CBR/RAR/CB7/7z/CBT/TAR 可直接进入导入流程
+- 本地漫画按当前编辑顺序无损导出 CBZ，并可保存到手机/云盘或调用系统分享
 - 网络密码使用 Android 安全存储，不进入 SQLite、完整备份或 GitHub
 - 无 App 账号、无社交、无广告、无云同步，不把原图写回系统相册
 
@@ -29,9 +34,9 @@
 
 ## 下载 Android 安装包
 
-- [下载私人书架 v1.1.0 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.1.0/private-shelf-v1.1.0-android.apk)
-- 文件大小：64,273,227 字节（约 61.3 MiB）
-- SHA-256：`DE7FBE4DEB6BEB042E1634606F1F3FD6A77D3629372ED7709C3B8A59A1ACDF04`
+- [下载私人书架 v1.2.0 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.2.0/private-shelf-v1.2.0-android.apk)
+- 文件大小：65,968,254 字节（约 62.9 MiB）
+- SHA-256：`1ADC32170E0DFEC68D92AD06A08C5EABF1184756D6D1D66288BF5890CB14CBD8`
 - 兼容 ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`
 
 仓库是私有仓库，下载时需要登录获授权的 GitHub 账号。
@@ -48,7 +53,7 @@ App Documents/private_shelf/
 
 Application Support/
 ├── library.db       # 漫画、书源索引、引用顺序、封面、进度和设置
-└── library.db.pre-v3 # 首次升级前自动保留的数据库快照
+└── library.db.pre-v5 # 首次升级 v1.2 前自动保留的数据库快照
 ```
 
 SQLite 只保存相对路径。备份恢复到另一台设备时不会依赖旧设备绝对路径。
@@ -65,11 +70,13 @@ $flutterExe = 'E:\CodexStorage\toolchains\flutter\bin\flutter.bat'
 & $flutterExe build apk --release
 ```
 
-Windows 上 Flutter 分析服务对中文工程路径存在已知兼容问题。本项目保留在统一中文目录中，开发时可从英文 Junction 进入；Android 构建已在项目级关闭 Kotlin 增量缓存，避免 Pub 缓存位于 C 盘而工程位于 E 盘时的跨盘路径问题。
+Windows 上 Flutter AOT 对中文真实路径仍有兼容性边界。代码保留在统一中文目录；分析和测试可经英文 Junction 执行，正式 AOT 发布应在纯英文临时构建目录中完成。
 
 ## 产品与回退
 
 - 产品行为规格：[docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md)
+- v1.2 总体设计与实施结果：[docs/V1.2_SHELF_GROUPING_READER_NAVIGATION_DESIGN.md](docs/V1.2_SHELF_GROUPING_READER_NAVIGATION_DESIGN.md)
+- v1.2 发布说明：[docs/RELEASE_NOTES_V1.2.0.md](docs/RELEASE_NOTES_V1.2.0.md)
 - 版本回退说明：[docs/ROLLBACK.md](docs/ROLLBACK.md)
 - 验收证据：[docs/ACCEPTANCE.md](docs/ACCEPTANCE.md)
 

@@ -18,8 +18,9 @@ class NewArchiveImportResult {
 Future<NewArchiveImportResult?> runNewArchiveImportFlow({
   required BuildContext context,
   required AppController controller,
+  List<PlatformFile>? providedFiles,
 }) async {
-  final files = await controller.pickArchives();
+  final files = providedFiles ?? await controller.pickArchives();
   if (files.isEmpty || !context.mounted) return null;
   PreparedArchiveSelection? selection;
   try {
@@ -30,9 +31,7 @@ Future<NewArchiveImportResult?> runNewArchiveImportFlow({
     if (!context.mounted) return null;
     final insufficient =
         freeBytes != null && preparedSelection.decodedBytes > freeBytes;
-    final titleController = TextEditingController(
-      text: preparedSelection.suggestedTitle,
-    );
+    var title = preparedSelection.suggestedTitle;
     final choice = await showDialog<_NewArchiveChoice>(
       context: context,
       builder: (context) => AlertDialog(
@@ -42,8 +41,9 @@ Future<NewArchiveImportResult?> runNewArchiveImportFlow({
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             if (!insufficient)
-              TextField(
-                controller: titleController,
+              TextFormField(
+                initialValue: title,
+                onChanged: (value) => title = value,
                 maxLength: 80,
                 decoration: const InputDecoration(
                   labelText: '漫画名称',
@@ -67,11 +67,11 @@ Future<NewArchiveImportResult?> runNewArchiveImportFlow({
           if (!insufficient)
             TextButton(
               onPressed: () {
-                final title = titleController.text.trim();
-                if (title.isNotEmpty) {
+                final normalized = title.trim();
+                if (normalized.isNotEmpty) {
                   Navigator.pop(
                     context,
-                    _NewArchiveChoice(title, DuplicatePolicy.keep),
+                    _NewArchiveChoice(normalized, DuplicatePolicy.keep),
                   );
                 }
               },
@@ -80,11 +80,11 @@ Future<NewArchiveImportResult?> runNewArchiveImportFlow({
           if (!insufficient)
             FilledButton(
               onPressed: () {
-                final title = titleController.text.trim();
-                if (title.isNotEmpty) {
+                final normalized = title.trim();
+                if (normalized.isNotEmpty) {
                   Navigator.pop(
                     context,
-                    _NewArchiveChoice(title, DuplicatePolicy.skip),
+                    _NewArchiveChoice(normalized, DuplicatePolicy.skip),
                   );
                 }
               },
@@ -93,7 +93,6 @@ Future<NewArchiveImportResult?> runNewArchiveImportFlow({
         ],
       ),
     );
-    titleController.dispose();
     if (choice == null || !context.mounted) return null;
     final comic = await controller.createComic(choice.title);
     if (!context.mounted) return null;

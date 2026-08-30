@@ -219,8 +219,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: <Widget>[
                 ListTile(
                   leading: const Icon(Icons.archive_outlined),
-                  title: const Text('创建完整备份'),
-                  subtitle: const Text('漫画、顺序、封面、进度与原图'),
+                  title: const Text('保存完整备份到手机/云盘'),
+                  subtitle: const Text('包含漫画、分组、书单、书签、进度与原图；卸载后仍可找回'),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: _createBackup,
                 ),
@@ -248,7 +248,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 24),
           const Center(
             child: Text(
-              '私人书架 1.1.0',
+              '私人书架 1.2.0',
               style: TextStyle(color: ShelfColors.muted, fontSize: 12),
             ),
           ),
@@ -303,11 +303,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _createBackup() async {
     try {
-      final file = await widget.controller.createAndShareBackup();
+      final result = await widget.controller.createAndExportBackup();
+      final file = result.$1;
+      final destination = result.$2;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('备份已创建：${file.path.split(RegExp(r'[/\\]')).last}'),
+            content: Text(
+              destination == null
+                  ? '已取消另存；应用内安全副本仍在：${file.path.split(RegExp(r'[/\\]')).last}'
+                  : '完整备份已保存到你选择的手机或云盘位置',
+            ),
           ),
         );
       }

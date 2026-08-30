@@ -1,6 +1,56 @@
 # 验收记录
 
-验收日期：2026-08-29
+验收日期：2026-08-30
+
+## V1.2.0 最终验收
+
+### 自动化、安全与核心逻辑
+
+- `flutter analyze`：零问题。
+- `flutter test`：30 项全部通过。
+- 新增回归覆盖：三列书架、私密文件夹删除后的保护语义、范围选图、多选块页码移动、600 页二分定位、CBZ 无损导出和网络挂载健康状态。
+- CBZ 导出测试确认按编辑后顺序生成 `0001.ext`、`0002.ext`，页面字节和 SHA-256 不变。
+- WebDAV 扫描/缓存和 OPDS 目录使用真实本地 HTTP 服务通过；跨主机 OPDS 下载不传递书库账号密码。
+- 网络挂载现在持久化“已连接/需重新登录/离线/不可达”、最后成功与同步时间、脱敏错误；密码仍只进 Android 安全存储。
+
+### v1.1.0 原位升级
+
+- GitHub v1.1.0 APK 的 SHA-256 已核对为 `DE7FBE4DEB6BEB042E1634606F1F3FD6A77D3629372ED7709C3B8A59A1ACDF04`，签名证书与 v1.2.0 一致。
+- 在 Android 15 模拟器以 v1.1.0 代码和数据为基线，使用 `adb install -r` 覆盖安装 v1.2.0+3 成功，未卸载、未清数据。
+- 升级后 `TestBook` 仍为 2 页、2.3 KB；3 个已存原图的 SHA-256 全部不变。
+- SQLite `user_version` 从 3 增量升至 5，新增分组、书单、书签、私密与网络状态结构，并自动生成 106,496 字节的 `library.db.pre-v5`。
+- 调试包下完成数据库与原图精确检查后，同代码、同版本、同签名的正式 Release APK 再次覆盖安装，冷启动正常，无 Flutter/SQLite 崩溃。
+
+### Android 真实操作回路
+
+- 经 Android MediaStore `content://` URI 点击 `incoming-test.cbz`，App 收到 ACTION_VIEW，自动识别为 1 个压缩包、3 页并显示导入确认。
+- 点“开始导入”后成功导入 3 页并自动进入编辑页。
+- 编辑页实际选中 2 页，“删除选中的 2 张图片”确认框可达；确认删除并保存后，书架正确显示剩 1 页。
+- 文件关联、导入、编辑、删除、保存全程无崩溃日志。
+
+### 卸载后备份恢复闭环
+
+- 在设置中使用“保存完整备份到手机/云盘”，通过 Android 系统文档选择器写到 `/sdcard/Download`。
+- 备份文件 13,754 字节，SHA-256 为 `50C37A3C2F326F6F3D0929B3F37AB608631A47A6BA1EA7CAF1D9788D9A7780FA`。
+- 在模拟器卸载 App 后，备份文件的路径、大小和 SHA-256 全部不变。
+- 重新安装 v1.2.0 后书架为空；从该外部备份恢复成功，`TestBook` 2 页和 `incoming-test` 1 页均回到书架。
+- 恢复前 App 仍自动创建 `recovery-pre-restore-*.mangabackup` 安全回退备份。
+
+### 最终 APK
+
+- 包名：`com.shitmof.private_manga_reader`
+- 版本：`1.2.0+3`
+- 最低 SDK 24，目标 SDK 36。
+- ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`。
+- 大小：65,968,254 字节。
+- SHA-256：`1ADC32170E0DFEC68D92AD06A08C5EABF1184756D6D1D66288BF5890CB14CBD8`。
+- APK Signature Scheme v2 校验通过；签名证书 SHA-256：`3724690e26bae1597ad10221c10f2b2b15ade2a5bfdbaf408834dc46eaace1a5`。
+
+### 已知验证边界
+
+- WebDAV 和 OPDS 已进行真实服务链路测试；当前环境没有用户的真实 NAS 与账号，因此 SMB/NAS 不冒充为“所有设备已验证”。
+- 备份当前是未加密 ZIP 容器；请将它保存在自己控制的存储中。
+- 为了与 v1.0/v1.1 原位升级，v1.2 延续现有签名证书，后续不得丢失或更换该密钥。
 
 ## V1.1.0 功能与升级验收
 
@@ -93,7 +143,7 @@
 - 阅读进度只写本机：退出后 `last_read_position=1`。
 - 解除挂载：`network_sources`/`remote_books`/`remote_pages` 清零，`network-cache/` 清空；服务器端 CBZ 保持原样（6413 字节不变，只读）。
 
-### 发现与边界（未改动，待你决定）
+### 当时发现（已在 v1.2.0 解决）
 
-- 系统文件选择器当前为单选：`ImportService.pickFromFiles()/pickFromGallery()` 未设置 `allowMultiple: true`，与 README“批量导入”描述不一致；本次验证以逐张导入完成，未改该行为（不在批准范围内）。若需要批量导入，建议后续补 `allowMultiple: true` 并加对应测试。
-- 本次未 bump 版本号、未构建/发布新 APK；源码与文档已推送私有 GitHub（`main`），回退点标签 `backup-pre-editor-fix-20260830` 已推送。
+- v1.2.0 已使用 file_picker 12 的多选默认行为，图片与压缩包都使用批量结果；单本上限仍是 1000 页。
+- v1.2.0 已递增版本为 `1.2.0+3`，完成 Release APK 构建、覆盖升级、卸载恢复与发布校验。

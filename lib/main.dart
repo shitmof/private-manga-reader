@@ -7,6 +7,7 @@ import 'data/network_repository.dart';
 import 'services/backup_service.dart';
 import 'services/archive_import_service.dart';
 import 'services/import_service.dart';
+import 'services/incoming_archive_service.dart';
 import 'services/network_credential_store.dart';
 import 'services/network_library_service.dart';
 import 'services/storage_service.dart';
@@ -35,6 +36,7 @@ Future<void> main() async {
     BackupService(repository, storage),
     networkRepository,
     networkLibrary,
+    incomingArchiveService: IncomingArchiveService(),
   );
   await controller.initialize();
   runApp(PrivateShelfApp(controller: controller));

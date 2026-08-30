@@ -76,6 +76,11 @@ class LibraryRepository {
       'id': comic.id,
       'title': comic.title,
       'cover_asset_id': null,
+      'folder_id': null,
+      'is_private': 0,
+      'is_pinned': 0,
+      'read_status': ReadingStatus.unread.name,
+      'last_read_at': null,
       'sort_index': comic.sortIndex,
       'created_at': now.toIso8601String(),
       'updated_at': now.toIso8601String(),
@@ -84,6 +89,336 @@ class LibraryRepository {
       'deleted_at': null,
     });
     return comic;
+  }
+
+  Future<List<ShelfFolder>> loadFolders() async {
+    final db = await _database.instance;
+    final rows = await db.query(
+      'shelf_folders',
+      orderBy: 'sort_index, created_at',
+    );
+    return rows.map(ShelfFolder.fromMap).toList(growable: false);
+  }
+
+  Future<ShelfFolder> createFolder(String name) async {
+    final normalized = name.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError.value(name, 'name', '文件夹名称不能为空');
+    }
+    final db = await _database.instance;
+    final now = DateTime.now().toUtc();
+    final indexRows = await db.rawQuery(
+      'SELECT COALESCE(MAX(sort_index), -1) + 1 AS next_index FROM shelf_folders',
+    );
+    final folder = ShelfFolder(
+      id: _uuid.v4(),
+      name: normalized,
+      sortIndex: indexRows.first['next_index']! as int,
+      createdAt: now,
+      updatedAt: now,
+    );
+    await db.insert('shelf_folders', <String, Object?>{
+      'id': folder.id,
+      'name': folder.name,
+      'is_private': 0,
+      'sort_index': folder.sortIndex,
+      'created_at': now.toIso8601String(),
+      'updated_at': now.toIso8601String(),
+    });
+    return folder;
+  }
+
+  Future<void> moveComicsToFolder(
+    List<String> comicIds,
+    String? folderId,
+  ) async {
+    if (comicIds.isEmpty) return;
+    final db = await _database.instance;
+    await db.transaction((txn) async {
+      if (folderId != null) {
+        final folder = await txn.query(
+          'shelf_folders',
+          columns: <String>['id', 'is_private'],
+          where: 'id = ?',
+          whereArgs: <Object?>[folderId],
+          limit: 1,
+        );
+        if (folder.isEmpty) throw StateError('目标文件夹不存在');
+      }
+      final updatedAt = DateTime.now().toUtc().toIso8601String();
+      for (final comicId in comicIds) {
+        await txn.update(
+          'comics',
+          <String, Object?>{
+            'folder_id': folderId,
+            if (folderId != null) 'is_private': 0,
+            'updated_at': updatedAt,
+          },
+          where: 'id = ? AND deleted_at IS NULL',
+          whereArgs: <Object?>[comicId],
+        );
+      }
+    });
+  }
+
+  Future<void> deleteFolder(String folderId) async {
+    final db = await _database.instance;
+    await db.transaction((txn) async {
+      final folders = await txn.query(
+        'shelf_folders',
+        columns: <String>['is_private'],
+        where: 'id = ?',
+        whereArgs: <Object?>[folderId],
+        limit: 1,
+      );
+      final wasPrivate =
+          folders.isNotEmpty && (folders.first['is_private'] as int? ?? 0) == 1;
+      await txn.update(
+        'comics',
+        <String, Object?>{'folder_id': null, if (wasPrivate) 'is_private': 1},
+        where: 'folder_id = ?',
+        whereArgs: <Object?>[folderId],
+      );
+      await txn.delete(
+        'shelf_folders',
+        where: 'id = ?',
+        whereArgs: <Object?>[folderId],
+      );
+    });
+  }
+
+  Future<void> renameFolder(String folderId, String name) async {
+    final normalized = name.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError.value(name, 'name', '文件夹名称不能为空');
+    }
+    final db = await _database.instance;
+    await db.update(
+      'shelf_folders',
+      <String, Object?>{
+        'name': normalized,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: <Object?>[folderId],
+    );
+  }
+
+  Future<void> setFolderPrivate(String folderId, bool value) async {
+    final db = await _database.instance;
+    await db.update(
+      'shelf_folders',
+      <String, Object?>{
+        'is_private': value ? 1 : 0,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: <Object?>[folderId],
+    );
+  }
+
+  Future<void> setComicPrivate(String comicId, bool value) async {
+    final db = await _database.instance;
+    await db.update(
+      'comics',
+      <String, Object?>{
+        'is_private': value ? 1 : 0,
+        if (value) 'folder_id': null,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'id = ? AND deleted_at IS NULL',
+      whereArgs: <Object?>[comicId],
+    );
+  }
+
+  Future<void> setComicPinned(String comicId, bool value) async {
+    final db = await _database.instance;
+    await db.update(
+      'comics',
+      <String, Object?>{
+        'is_pinned': value ? 1 : 0,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'id = ? AND deleted_at IS NULL',
+      whereArgs: <Object?>[comicId],
+    );
+  }
+
+  Future<void> setReadingStatus(String comicId, ReadingStatus status) async {
+    final db = await _database.instance;
+    await db.update(
+      'comics',
+      <String, Object?>{
+        'read_status': status.name,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'id = ? AND deleted_at IS NULL',
+      whereArgs: <Object?>[comicId],
+    );
+  }
+
+  Future<PageBookmark> saveBookmark({
+    required String comicId,
+    required String itemId,
+    String note = '',
+  }) async {
+    final db = await _database.instance;
+    return db.transaction((txn) async {
+      final page = await txn.query(
+        'comic_items',
+        columns: <String>['position'],
+        where: 'id = ? AND comic_id = ?',
+        whereArgs: <Object?>[itemId, comicId],
+        limit: 1,
+      );
+      if (page.isEmpty) throw StateError('书签页面不存在');
+      final existing = await txn.query(
+        'page_bookmarks',
+        where: 'item_id = ?',
+        whereArgs: <Object?>[itemId],
+        limit: 1,
+      );
+      final now = DateTime.now().toUtc();
+      final id = existing.isEmpty
+          ? _uuid.v4()
+          : existing.first['id']! as String;
+      final createdAt = existing.isEmpty
+          ? now
+          : DateTime.parse(existing.first['created_at']! as String);
+      await txn.insert('page_bookmarks', <String, Object?>{
+        'id': id,
+        'comic_id': comicId,
+        'item_id': itemId,
+        'note': note.trim(),
+        'created_at': createdAt.toIso8601String(),
+        'updated_at': now.toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      return PageBookmark(
+        id: id,
+        comicId: comicId,
+        itemId: itemId,
+        position: page.first['position']! as int,
+        note: note.trim(),
+        createdAt: createdAt,
+        updatedAt: now,
+      );
+    });
+  }
+
+  Future<List<PageBookmark>> loadBookmarks(String comicId) async {
+    final db = await _database.instance;
+    final rows = await db.rawQuery(
+      '''
+      SELECT b.*, ci.position
+      FROM page_bookmarks b
+      JOIN comic_items ci ON ci.id = b.item_id
+      WHERE b.comic_id = ?
+      ORDER BY ci.position, b.created_at
+      ''',
+      <Object?>[comicId],
+    );
+    return rows.map(PageBookmark.fromMap).toList(growable: false);
+  }
+
+  Future<void> deleteBookmark(String bookmarkId) async {
+    final db = await _database.instance;
+    await db.delete(
+      'page_bookmarks',
+      where: 'id = ?',
+      whereArgs: <Object?>[bookmarkId],
+    );
+  }
+
+  Future<List<ReadingList>> loadReadingLists() async {
+    final db = await _database.instance;
+    final rows = await db.query(
+      'reading_lists',
+      orderBy: 'sort_index, created_at',
+    );
+    return rows.map(ReadingList.fromMap).toList(growable: false);
+  }
+
+  Future<ReadingList> createReadingList(String name) async {
+    final normalized = name.trim();
+    if (normalized.isEmpty) throw ArgumentError.value(name, 'name', '书单名称不能为空');
+    final db = await _database.instance;
+    final now = DateTime.now().toUtc();
+    final indexRows = await db.rawQuery(
+      'SELECT COALESCE(MAX(sort_index), -1) + 1 AS next_index FROM reading_lists',
+    );
+    final list = ReadingList(
+      id: _uuid.v4(),
+      name: normalized,
+      sortIndex: indexRows.first['next_index']! as int,
+      createdAt: now,
+      updatedAt: now,
+    );
+    await db.insert('reading_lists', <String, Object?>{
+      'id': list.id,
+      'name': list.name,
+      'sort_index': list.sortIndex,
+      'created_at': now.toIso8601String(),
+      'updated_at': now.toIso8601String(),
+    });
+    return list;
+  }
+
+  Future<void> addComicsToReadingList(
+    String listId,
+    List<String> comicIds,
+  ) async {
+    if (comicIds.isEmpty) return;
+    final db = await _database.instance;
+    await db.transaction((txn) async {
+      final list = await txn.query(
+        'reading_lists',
+        columns: <String>['id'],
+        where: 'id = ?',
+        whereArgs: <Object?>[listId],
+        limit: 1,
+      );
+      if (list.isEmpty) throw StateError('目标书单不存在');
+      final nextRows = await txn.rawQuery(
+        'SELECT COALESCE(MAX(sort_index), -1) + 1 AS next_index '
+        'FROM reading_list_items WHERE list_id = ?',
+        <Object?>[listId],
+      );
+      var next = nextRows.first['next_index']! as int;
+      final createdAt = DateTime.now().toUtc().toIso8601String();
+      for (final comicId in comicIds) {
+        final inserted = await txn
+            .insert('reading_list_items', <String, Object?>{
+              'list_id': listId,
+              'comic_id': comicId,
+              'sort_index': next,
+              'created_at': createdAt,
+            }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        if (inserted != 0) next++;
+      }
+    });
+  }
+
+  Future<List<String>> loadReadingListComicIds(String listId) async {
+    final db = await _database.instance;
+    final rows = await db.query(
+      'reading_list_items',
+      columns: <String>['comic_id'],
+      where: 'list_id = ?',
+      whereArgs: <Object?>[listId],
+      orderBy: 'sort_index, created_at',
+    );
+    return rows
+        .map((row) => row['comic_id']! as String)
+        .toList(growable: false);
+  }
+
+  Future<void> deleteReadingList(String listId) async {
+    final db = await _database.instance;
+    await db.delete(
+      'reading_lists',
+      where: 'id = ?',
+      whereArgs: <Object?>[listId],
+    );
   }
 
   Future<void> renameComic(String id, String title) async {
@@ -272,21 +607,23 @@ class LibraryRepository {
           whereArgs: <Object?>[orderedItemIds[index], comicId],
         );
       }
+      String? persistedCover;
       if (coverAssetId != null) {
         final coverExists = await txn.rawQuery(
           'SELECT 1 FROM comic_items WHERE comic_id = ? AND asset_id = ? LIMIT 1',
           <Object?>[comicId, coverAssetId],
         );
-        await txn.update(
-          'comics',
-          <String, Object?>{
-            'cover_asset_id': coverExists.isEmpty ? null : coverAssetId,
-            'updated_at': DateTime.now().toUtc().toIso8601String(),
-          },
-          where: 'id = ?',
-          whereArgs: <Object?>[comicId],
-        );
+        persistedCover = coverExists.isEmpty ? null : coverAssetId;
       }
+      await txn.update(
+        'comics',
+        <String, Object?>{
+          'cover_asset_id': persistedCover,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: <Object?>[comicId],
+      );
     });
   }
 
@@ -354,11 +691,14 @@ class LibraryRepository {
 
   Future<void> saveProgress(String comicId, int position, double offset) async {
     final db = await _database.instance;
+    final now = DateTime.now().toUtc().toIso8601String();
     await db.update(
       'comics',
       <String, Object?>{
         'last_read_position': position,
         'last_read_offset': offset,
+        'last_read_at': now,
+        'read_status': ReadingStatus.reading.name,
       },
       where: 'id = ?',
       whereArgs: <Object?>[comicId],
@@ -376,6 +716,11 @@ class LibraryRepository {
       imageGap: double.tryParse(values['image_gap'] ?? '') ?? 10,
       showPageNumber: values['show_page_number'] != 'false',
       rememberProgress: values['remember_progress'] != 'false',
+      readerBrightness:
+          (double.tryParse(values['reader_brightness'] ?? '') ?? 0.72).clamp(
+            0.05,
+            1,
+          ),
       theme: AppThemePreference.values.firstWhere(
         (value) => value.name == themeName,
         orElse: () => AppThemePreference.system,
@@ -389,6 +734,7 @@ class LibraryRepository {
       'image_gap': preferences.imageGap.toString(),
       'show_page_number': preferences.showPageNumber.toString(),
       'remember_progress': preferences.rememberProgress.toString(),
+      'reader_brightness': preferences.readerBrightness.toString(),
       'theme': preferences.theme.name,
     };
     await db.transaction((txn) async {
@@ -467,7 +813,7 @@ class LibraryRepository {
             .toList(growable: false);
     return <String, Object?>{
       'format': 'private-manga-reader-backup',
-      'version': 2,
+      'version': 3,
       'createdAt': DateTime.now().toUtc().toIso8601String(),
       'comics': await db.query('comics', orderBy: 'sort_index'),
       'assets': await db.query('assets'),
@@ -476,6 +822,22 @@ class LibraryRepository {
         orderBy: 'comic_id, position',
       ),
       'settings': await db.query('settings'),
+      'shelfFolders': await db.query(
+        'shelf_folders',
+        orderBy: 'sort_index, created_at',
+      ),
+      'pageBookmarks': await db.query(
+        'page_bookmarks',
+        orderBy: 'comic_id, created_at',
+      ),
+      'readingLists': await db.query(
+        'reading_lists',
+        orderBy: 'sort_index, created_at',
+      ),
+      'readingListItems': await db.query(
+        'reading_list_items',
+        orderBy: 'list_id, sort_index',
+      ),
       'networkSources': await db.query(
         'network_sources',
         orderBy: 'created_at',
@@ -488,7 +850,7 @@ class LibraryRepository {
   Future<void> replaceFromManifest(Map<String, Object?> manifest) async {
     final version = manifest['version'];
     if (manifest['format'] != 'private-manga-reader-backup' ||
-        (version != 1 && version != 2)) {
+        (version != 1 && version != 2 && version != 3)) {
       throw const FormatException('不支持的备份格式');
     }
     final db = await _database.instance;
@@ -496,33 +858,61 @@ class LibraryRepository {
     final comics = _rows(manifest['comics']);
     final items = _rows(manifest['comicItems']);
     final settings = _rows(manifest['settings']);
-    final networkSources = version == 2
+    final folders = version == 3
+        ? _rows(manifest['shelfFolders'])
+        : const <Map<String, Object?>>[];
+    final bookmarks = version == 3
+        ? _rows(manifest['pageBookmarks'])
+        : const <Map<String, Object?>>[];
+    final readingLists = version == 3
+        ? _rows(manifest['readingLists'])
+        : const <Map<String, Object?>>[];
+    final readingListItems = version == 3
+        ? _rows(manifest['readingListItems'])
+        : const <Map<String, Object?>>[];
+    final networkSources = version == 2 || version == 3
         ? _rows(manifest['networkSources'])
         : const <Map<String, Object?>>[];
-    final remoteBooks = version == 2
+    final remoteBooks = version == 2 || version == 3
         ? _rows(manifest['remoteBooks'])
         : const <Map<String, Object?>>[];
-    final remotePages = version == 2
+    final remotePages = version == 2 || version == 3
         ? _rows(manifest['remotePages'])
         : const <Map<String, Object?>>[];
     await db.transaction((txn) async {
-      if (version == 2) {
+      await txn.delete('reading_list_items');
+      await txn.delete('reading_lists');
+      await txn.delete('page_bookmarks');
+      if (version == 2 || version == 3) {
         await txn.delete('remote_pages');
         await txn.delete('remote_books');
         await txn.delete('network_sources');
       }
       await txn.delete('comic_items');
       await txn.delete('comics');
+      await txn.delete('shelf_folders');
       await txn.delete('assets');
       await txn.delete('settings');
       for (final row in assets) {
         await txn.insert('assets', row);
+      }
+      for (final row in folders) {
+        await txn.insert('shelf_folders', row);
       }
       for (final row in comics) {
         await txn.insert('comics', row);
       }
       for (final row in items) {
         await txn.insert('comic_items', row);
+      }
+      for (final row in bookmarks) {
+        await txn.insert('page_bookmarks', row);
+      }
+      for (final row in readingLists) {
+        await txn.insert('reading_lists', row);
+      }
+      for (final row in readingListItems) {
+        await txn.insert('reading_list_items', row);
       }
       for (final row in settings) {
         await txn.insert('settings', row);

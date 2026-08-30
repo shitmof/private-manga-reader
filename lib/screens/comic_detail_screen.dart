@@ -167,6 +167,22 @@ class ComicDetailScreen extends StatelessWidget {
                     ),
                     const Divider(height: 1, indent: 56),
                     ListTile(
+                      leading: const Icon(Icons.download_outlined),
+                      title: const Text('导出 CBZ 到手机/云盘'),
+                      subtitle: const Text('按当前顺序导出，原图不重新编码'),
+                      enabled: summary.itemCount > 0,
+                      onTap: () => _exportComic(context, share: false),
+                    ),
+                    const Divider(height: 1, indent: 56),
+                    ListTile(
+                      leading: const Icon(Icons.share_outlined),
+                      title: const Text('分享漫画文件'),
+                      subtitle: const Text('通过 Android 系统分享 CBZ'),
+                      enabled: summary.itemCount > 0,
+                      onTap: () => _exportComic(context, share: true),
+                    ),
+                    const Divider(height: 1, indent: 56),
+                    ListTile(
                       leading: const Icon(Icons.cloud_download_outlined),
                       title: const Text('创建完整备份'),
                       subtitle: const Text('包含整个书架结构与所有原图'),
@@ -242,11 +258,17 @@ class ComicDetailScreen extends StatelessWidget {
 
   Future<void> _backup(BuildContext context) async {
     try {
-      final file = await controller.createAndShareBackup();
+      final result = await controller.createAndExportBackup();
+      final file = result.$1;
+      final destination = result.$2;
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('备份已创建：${file.path.split(RegExp(r'[/\\]')).last}'),
+            content: Text(
+              destination == null
+                  ? '已取消另存；应用内已保留 ${file.path.split(RegExp(r'[/\\]')).last}'
+                  : '完整备份已保存到手机或云盘',
+            ),
           ),
         );
       }
@@ -255,6 +277,66 @@ class ComicDetailScreen extends StatelessWidget {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('备份失败：$error')));
+      }
+    }
+  }
+
+  Future<void> _exportComic(BuildContext context, {required bool share}) async {
+    final summary = controller.summaryFor(comicId);
+    if (summary == null || summary.itemCount == 0) return;
+    if (summary.comic.isPrivate && !await controller.unlockPrivateShelf()) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('未通过身份验证，未导出私密漫画')));
+      }
+      return;
+    }
+    if (!context.mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(share ? '生成并分享 CBZ？' : '导出 CBZ？'),
+        content: Text(
+          '将按当前编辑后顺序写入 ${summary.itemCount} 张原图，'
+          '约 ${formatBytes(summary.totalBytes)}。原图字节不会重新编码。',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(share ? '生成并分享' : '开始导出'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      final export = await controller.createComicExport(comicId);
+      if (share) {
+        await controller.shareComicExport(export);
+      } else {
+        final destination = await controller.saveComicExport(export);
+        if (destination == null) return;
+      }
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${share ? '已打开分享面板' : '已导出'} · '
+              '${export.pageCount} 张 · SHA-256 ${export.sha256.substring(0, 12)}…',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('导出失败：$error')));
       }
     }
   }

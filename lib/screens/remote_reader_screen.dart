@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import '../models/entities.dart';
+import '../services/page_offset_index.dart';
 import '../state/app_controller.dart';
 
 class RemoteReaderScreen extends StatefulWidget {
@@ -29,6 +30,10 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
   bool _controlsVisible = false;
   int _currentIndex = 0;
   double _lastLayoutWidth = 0;
+  PageOffsetIndex _offsetIndex = PageOffsetIndex.fromExtents(
+    const <double>[],
+    gap: 0,
+  );
 
   @override
   void initState() {
@@ -70,7 +75,7 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
     final book = widget.controller.remoteBookFor(widget.bookId);
     final gap = widget.controller.preferences.imageGap;
     final width = MediaQuery.sizeOf(context).width;
-    _lastLayoutWidth = width;
+    _ensureOffsetIndex(width, gap);
     return Scaffold(
       backgroundColor: const Color(0xFF0B0D10),
       body: GestureDetector(
@@ -83,44 +88,51 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
                 child: CircularProgressIndicator(color: Colors.white),
               )
             else
-              ListView.builder(
+              Scrollbar(
                 controller: _scrollController,
-                padding: EdgeInsets.zero,
-                scrollCacheExtent: const ScrollCacheExtent.pixels(1200),
-                itemCount: _pages.length,
-                itemBuilder: (context, index) {
-                  final page = _pages[index];
-                  return Padding(
-                    padding: EdgeInsets.only(
-                      bottom: index == _pages.length - 1 ? 0 : gap,
-                    ),
-                    child: GestureDetector(
-                      onDoubleTap: () => _showZoom(page),
-                      child: SizedBox(
-                        width: width,
-                        height: _displayHeight(page, width),
-                        child: Image.file(
-                          File(widget.controller.filePath(page.relativePath)),
-                          fit: BoxFit.contain,
-                          alignment: Alignment.topCenter,
-                          cacheWidth:
-                              (width * MediaQuery.devicePixelRatioOf(context))
-                                  .round()
-                                  .clamp(360, 2400),
-                          filterQuality: FilterQuality.medium,
-                          errorBuilder: (context, error, stackTrace) =>
-                              const Center(
-                                child: Icon(
-                                  Icons.broken_image_outlined,
-                                  size: 42,
-                                  color: Colors.white54,
+                interactive: true,
+                thumbVisibility: true,
+                thickness: 6,
+                radius: const Radius.circular(3),
+                child: ListView.builder(
+                  controller: _scrollController,
+                  padding: EdgeInsets.zero,
+                  scrollCacheExtent: const ScrollCacheExtent.pixels(1200),
+                  itemCount: _pages.length,
+                  itemBuilder: (context, index) {
+                    final page = _pages[index];
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        bottom: index == _pages.length - 1 ? 0 : gap,
+                      ),
+                      child: GestureDetector(
+                        onDoubleTap: () => _showZoom(page),
+                        child: SizedBox(
+                          width: width,
+                          height: _displayHeight(page, width),
+                          child: Image.file(
+                            File(widget.controller.filePath(page.relativePath)),
+                            fit: BoxFit.contain,
+                            alignment: Alignment.topCenter,
+                            cacheWidth:
+                                (width * MediaQuery.devicePixelRatioOf(context))
+                                    .round()
+                                    .clamp(360, 2400),
+                            filterQuality: FilterQuality.medium,
+                            errorBuilder: (context, error, stackTrace) =>
+                                const Center(
+                                  child: Icon(
+                                    Icons.broken_image_outlined,
+                                    size: 42,
+                                    color: Colors.white54,
+                                  ),
                                 ),
-                              ),
+                          ),
                         ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
             _RemoteReaderTopBar(
               visible: _controlsVisible,
@@ -141,6 +153,7 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
                   widget.controller.preferences.showPageNumber,
               current: _pages.isEmpty ? 0 : _currentIndex + 1,
               total: _pages.length,
+              onPageChanged: _jumpToPage,
             ),
           ],
         ),
@@ -153,18 +166,24 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
     return width * page.height / page.width;
   }
 
+  void _ensureOffsetIndex(double width, double gap) {
+    if (_lastLayoutWidth == width && _offsetIndex.pageCount == _pages.length) {
+      return;
+    }
+    _lastLayoutWidth = width;
+    _offsetIndex = PageOffsetIndex.fromExtents(
+      _pages.map((page) => _displayHeight(page, width)).toList(),
+      gap: gap,
+    );
+  }
+
   void _restoreProgress() {
     if (!_scrollController.hasClients || _pages.isEmpty) return;
     final book = widget.controller.remoteBookFor(widget.bookId);
     if (book == null || !widget.controller.preferences.rememberProgress) return;
     final targetIndex = book.lastReadPosition.clamp(0, _pages.length - 1);
-    var offset = 0.0;
-    for (var index = 0; index < targetIndex; index++) {
-      offset +=
-          _displayHeight(_pages[index], _lastLayoutWidth) +
-          widget.controller.preferences.imageGap;
-    }
-    offset += book.lastReadOffset;
+    final offset =
+        _offsetIndex.offsetForPage(targetIndex) + book.lastReadOffset;
     _scrollController.jumpTo(
       offset.clamp(0, _scrollController.position.maxScrollExtent),
     );
@@ -173,19 +192,7 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
 
   void _handleScroll() {
     if (_pages.isEmpty || _lastLayoutWidth <= 0) return;
-    final offset = _scrollController.offset;
-    var top = 0.0;
-    var index = 0;
-    final gap = widget.controller.preferences.imageGap;
-    for (var current = 0; current < _pages.length; current++) {
-      final extent = _displayHeight(_pages[current], _lastLayoutWidth) + gap;
-      if (top + extent * 0.58 > offset) {
-        index = current;
-        break;
-      }
-      top += extent;
-      index = current;
-    }
+    final index = _offsetIndex.pageAtOffset(_scrollController.offset + 1);
     if (index != _currentIndex && mounted) {
       setState(() => _currentIndex = index);
     }
@@ -193,11 +200,7 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
 
   Future<void> _saveProgress() async {
     if (_pages.isEmpty || _lastLayoutWidth <= 0) return;
-    var top = 0.0;
-    final gap = widget.controller.preferences.imageGap;
-    for (var index = 0; index < _currentIndex; index++) {
-      top += _displayHeight(_pages[index], _lastLayoutWidth) + gap;
-    }
+    final top = _offsetIndex.offsetForPage(_currentIndex);
     final within = _scrollController.hasClients
         ? (_scrollController.offset - top).clamp(0.0, double.infinity)
         : 0.0;
@@ -206,6 +209,17 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
       _currentIndex,
       within,
     );
+  }
+
+  void _jumpToPage(int page) {
+    if (!_scrollController.hasClients || _pages.isEmpty) return;
+    final targetPage = page.clamp(0, _pages.length - 1);
+    _scrollController.jumpTo(
+      _offsetIndex
+          .offsetForPage(targetPage)
+          .clamp(0.0, _scrollController.position.maxScrollExtent),
+    );
+    if (_currentIndex != targetPage) setState(() => _currentIndex = targetPage);
   }
 
   Future<void> _showZoom(RemotePage page) async {
@@ -314,11 +328,13 @@ class _RemoteReaderBottomBar extends StatelessWidget {
     required this.visible,
     required this.current,
     required this.total,
+    required this.onPageChanged,
   });
 
   final bool visible;
   final int current;
   final int total;
+  final ValueChanged<int> onPageChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -344,11 +360,14 @@ class _RemoteReaderBottomBar extends StatelessWidget {
                   child: Row(
                     children: <Widget>[
                       Expanded(
-                        child: LinearProgressIndicator(
-                          value: total == 0 ? 0 : current / total,
-                          minHeight: 3,
-                          color: const Color(0xFF78ADE5),
-                          backgroundColor: Colors.white24,
+                        child: Slider(
+                          value: total <= 1 ? 0 : (current - 1).toDouble(),
+                          min: 0,
+                          max: total <= 1 ? 0 : (total - 1).toDouble(),
+                          divisions: total <= 1 ? null : total - 1,
+                          onChanged: total <= 1
+                              ? null
+                              : (value) => onPageChanged(value.round()),
                         ),
                       ),
                       const SizedBox(width: 16),

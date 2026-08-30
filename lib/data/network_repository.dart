@@ -46,6 +46,10 @@ class NetworkRepository {
           username: source.username,
           createdAt: source.createdAt,
           updatedAt: DateTime.now().toUtc(),
+          connectionState: source.connectionState,
+          lastSuccessAt: source.lastSuccessAt,
+          lastSyncAt: source.lastSyncAt,
+          lastError: source.lastError,
         ),
       ),
       where: 'id = ?',
@@ -74,6 +78,42 @@ class NetworkRepository {
     final db = await _database.instance;
     await db.delete(
       'network_sources',
+      where: 'id = ?',
+      whereArgs: <Object?>[id],
+    );
+  }
+
+  Future<void> recordSourceSuccess(String id, {required bool synced}) async {
+    final db = await _database.instance;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.update(
+      'network_sources',
+      <String, Object?>{
+        'connection_state': NetworkConnectionState.connected.name,
+        'last_success_at': now,
+        if (synced) 'last_sync_at': now,
+        'last_error': null,
+        'updated_at': now,
+      },
+      where: 'id = ?',
+      whereArgs: <Object?>[id],
+    );
+  }
+
+  Future<void> recordSourceFailure(
+    String id, {
+    required NetworkConnectionState state,
+    required String error,
+  }) async {
+    final db = await _database.instance;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.update(
+      'network_sources',
+      <String, Object?>{
+        'connection_state': state.name,
+        'last_error': _sanitizeError(error),
+        'updated_at': now,
+      },
       where: 'id = ?',
       whereArgs: <Object?>[id],
     );
@@ -248,7 +288,21 @@ class NetworkRepository {
     'endpoint': source.endpoint,
     'root_path': source.rootPath,
     'username': source.username,
+    'connection_state': source.connectionState.name,
+    'last_success_at': source.lastSuccessAt?.toIso8601String(),
+    'last_sync_at': source.lastSyncAt?.toIso8601String(),
+    'last_error': source.lastError,
     'created_at': source.createdAt.toIso8601String(),
     'updated_at': source.updatedAt.toIso8601String(),
   };
+
+  String _sanitizeError(String error) {
+    final oneLine = error
+        .replaceAll(RegExp(r'https?://[^\s]+', caseSensitive: false), '远程地址')
+        .replaceAll(RegExp(r'smb://[^\s]+', caseSensitive: false), '远程地址')
+        .replaceAll(RegExp(r'[\r\n]+'), ' ')
+        .trim();
+    if (oneLine.isEmpty) return '连接失败';
+    return oneLine.length <= 240 ? oneLine : '${oneLine.substring(0, 240)}…';
+  }
 }

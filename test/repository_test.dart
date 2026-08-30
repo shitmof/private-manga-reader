@@ -15,6 +15,7 @@ import 'package:private_manga_reader/data/network_repository.dart';
 import 'package:private_manga_reader/models/entities.dart';
 import 'package:private_manga_reader/services/backup_service.dart';
 import 'package:private_manga_reader/services/archive_import_service.dart';
+import 'package:private_manga_reader/services/comic_export_service.dart';
 import 'package:private_manga_reader/services/import_service.dart';
 import 'package:private_manga_reader/services/network_credential_store.dart';
 import 'package:private_manga_reader/services/network_library_service.dart';
@@ -234,6 +235,159 @@ void main() {
     );
   }, timeout: const Timeout(Duration(minutes: 2)));
 
+  test('用户可以创建文件夹、移入漫画并在删除文件夹后保留漫画', () async {
+    final comic = await repository.createComic('准备阅读');
+
+    final folder = await repository.createFolder('想看的漫画');
+    await repository.moveComicsToFolder(<String>[comic.id], folder.id);
+
+    final folders = await repository.loadFolders();
+    expect(folders, hasLength(1));
+    expect(folders.single.name, '想看的漫画');
+    expect((await repository.getComic(comic.id))?.comic.folderId, folder.id);
+
+    await repository.deleteFolder(folder.id);
+    expect(await repository.loadFolders(), isEmpty);
+    final ungrouped = await repository.getComic(comic.id);
+    expect(ungrouped, isNotNull);
+    expect(ungrouped!.comic.folderId, isNull);
+  });
+
+  test('私密文件夹可整体锁定，删除分组后内容仍保持私密', () async {
+    final comic = await repository.createComic('私密文件夹内容');
+    final folder = await repository.createFolder('私密文件夹');
+    await repository.moveComicsToFolder(<String>[comic.id], folder.id);
+    await repository.setFolderPrivate(folder.id, true);
+
+    expect((await repository.loadFolders()).single.isPrivate, isTrue);
+    final grouped = (await repository.loadLibrary()).single.comic;
+    expect(grouped.folderId, folder.id);
+    expect(grouped.isPrivate, isFalse);
+
+    await repository.deleteFolder(folder.id);
+    final ungrouped = (await repository.loadLibrary()).single.comic;
+    expect(ungrouped.folderId, isNull);
+    expect(ungrouped.isPrivate, isTrue);
+  });
+
+  test('用户可以把漫画设为私密并为具体页面保存本地书签', () async {
+    final comic = await repository.createComic('私人收藏');
+    final source = await _createPng(sandbox, 'bookmark.png');
+    await importer.importFiles(
+      comicId: comic.id,
+      files: <PlatformFile>[_TestPlatformFile(source)],
+      duplicatePolicy: DuplicatePolicy.keep,
+    );
+    final page = (await repository.loadItems(comic.id)).single;
+
+    await repository.setComicPrivate(comic.id, true);
+    final bookmark = await repository.saveBookmark(
+      comicId: comic.id,
+      itemId: page.id,
+      note: '以后回来这里',
+    );
+
+    expect((await repository.getComic(comic.id))?.comic.isPrivate, isTrue);
+    final bookmarks = await repository.loadBookmarks(comic.id);
+    expect(bookmarks, hasLength(1));
+    expect(bookmarks.single.id, bookmark.id);
+    expect(bookmarks.single.itemId, page.id);
+    expect(bookmarks.single.note, '以后回来这里');
+  });
+
+  test('编辑器删除当前封面页后会清空失效封面引用', () async {
+    final comic = await repository.createComic('封面测试');
+    final first = await _createPng(sandbox, 'cover-first.png');
+    final second = await _createPng(sandbox, 'cover-second.png');
+    await second.writeAsBytes(_pngBytes(2), flush: true);
+    await importer.importFiles(
+      comicId: comic.id,
+      files: <PlatformFile>[
+        _TestPlatformFile(first),
+        _TestPlatformFile(second),
+      ],
+      duplicatePolicy: DuplicatePolicy.keep,
+    );
+    final pages = await repository.loadItems(comic.id);
+    await repository.setCover(comic.id, pages.first.asset.id);
+
+    await repository.applyItemEdits(
+      comicId: comic.id,
+      orderedItemIds: <String>[pages.last.id],
+      removedItemIds: <String>[pages.first.id],
+      coverAssetId: null,
+    );
+
+    expect((await repository.getComic(comic.id))?.comic.coverAssetId, isNull);
+  });
+
+  test('一本漫画可以加入多个本地书单而不改变所在文件夹', () async {
+    final comic = await repository.createComic('跨分类漫画');
+    final folder = await repository.createFolder('主文件夹');
+    await repository.moveComicsToFolder(<String>[comic.id], folder.id);
+
+    final favorites = await repository.createReadingList('收藏');
+    final weekend = await repository.createReadingList('周末阅读');
+    await repository.addComicsToReadingList(favorites.id, <String>[comic.id]);
+    await repository.addComicsToReadingList(weekend.id, <String>[comic.id]);
+
+    expect(await repository.loadReadingLists(), hasLength(2));
+    expect(await repository.loadReadingListComicIds(favorites.id), <String>[
+      comic.id,
+    ]);
+    expect(await repository.loadReadingListComicIds(weekend.id), <String>[
+      comic.id,
+    ]);
+    expect((await repository.getComic(comic.id))?.comic.folderId, folder.id);
+  });
+
+  test('导出 CBZ 保持编辑后顺序、原图字节和补零文件名', () async {
+    final comic = await repository.createComic('CBZ 导出验证');
+    final first = File(p.join(sandbox.path, 'first.png'));
+    final second = File(p.join(sandbox.path, 'second.png'));
+    await first.writeAsBytes(_pngBytes(11), flush: true);
+    await second.writeAsBytes(_pngBytes(22), flush: true);
+    await importer.importFiles(
+      comicId: comic.id,
+      files: <PlatformFile>[
+        _TestPlatformFile(first),
+        _TestPlatformFile(second),
+      ],
+      duplicatePolicy: DuplicatePolicy.keep,
+    );
+    final items = await repository.loadItems(comic.id);
+    await repository.applyItemEdits(
+      comicId: comic.id,
+      orderedItemIds: items.reversed.map((item) => item.id).toList(),
+      removedItemIds: const <String>[],
+      coverAssetId: items.last.asset.id,
+    );
+
+    final result = await ComicExportService(
+      repository,
+      storage,
+    ).createCbz(comic.id);
+    final archive = legacy_archive.ZipDecoder().decodeBytes(
+      await result.file.readAsBytes(),
+      verify: true,
+    );
+    final pages = archive.files
+        .where((file) => RegExp(r'^\d{4}\.png$').hasMatch(file.name))
+        .toList();
+
+    expect(result.pageCount, 2);
+    expect(pages.map((file) => file.name), <String>['0001.png', '0002.png']);
+    expect(
+      sha256.convert(pages.first.content as List<int>),
+      sha256.convert(await second.readAsBytes()),
+    );
+    expect(
+      sha256.convert(pages.last.content as List<int>),
+      sha256.convert(await first.readAsBytes()),
+    );
+    expect(archive.findFile('ComicInfo.xml'), isNotNull);
+  });
+
   test('完整备份可恢复名称、封面、顺序、进度与原图', () async {
     final comic = await repository.createComic('备份原名');
     final source = await _createPng(sandbox, 'backup.png');
@@ -245,6 +399,16 @@ void main() {
     final item = (await repository.loadItems(comic.id)).single;
     await repository.setCover(comic.id, item.asset.id);
     await repository.saveProgress(comic.id, 0, 12.5);
+    final folder = await repository.createFolder('备份文件夹');
+    await repository.moveComicsToFolder(<String>[comic.id], folder.id);
+    await repository.setFolderPrivate(folder.id, true);
+    await repository.saveBookmark(
+      comicId: comic.id,
+      itemId: item.id,
+      note: '备份书签',
+    );
+    final readingList = await repository.createReadingList('备份书单');
+    await repository.addComicsToReadingList(readingList.id, <String>[comic.id]);
     final network = NetworkRepository(database);
     final networkSource = await network.createSource(
       name: '备份网络书库',
@@ -270,6 +434,9 @@ void main() {
 
     await repository.renameComic(comic.id, '被修改');
     await repository.removeItem(item.id);
+    await repository.deleteFolder(folder.id);
+    await repository.deleteReadingList(readingList.id);
+    await repository.setComicPrivate(comic.id, false);
     await network.deleteSource(networkSource.id);
     await backupService.restoreBackup(_TestPlatformFile(backup));
 
@@ -277,6 +444,8 @@ void main() {
     expect(restored?.comic.title, '备份原名');
     expect(restored?.comic.coverAssetId, item.asset.id);
     expect(restored?.comic.lastReadOffset, 12.5);
+    expect(restored?.comic.folderId, folder.id);
+    expect(restored?.comic.isPrivate, isFalse);
     final restoredItems = await repository.loadItems(comic.id);
     expect(restoredItems, hasLength(1));
     final restoredFile = File(
@@ -287,6 +456,14 @@ void main() {
       (await sha256.bind(restoredFile.openRead()).first).toString(),
       item.asset.contentHash,
     );
+    final restoredFolder = (await repository.loadFolders()).single;
+    expect(restoredFolder.name, '备份文件夹');
+    expect(restoredFolder.isPrivate, isTrue);
+    expect((await repository.loadBookmarks(comic.id)).single.note, '备份书签');
+    expect((await repository.loadReadingLists()).single.name, '备份书单');
+    expect(await repository.loadReadingListComicIds(readingList.id), <String>[
+      comic.id,
+    ]);
     final restoredSources = await network.loadSources();
     expect(restoredSources.single.name, '备份网络书库');
     final restoredRemote = (await network.loadBooks(
@@ -295,6 +472,37 @@ void main() {
     expect(restoredRemote.lastReadPosition, 8);
     expect(restoredRemote.lastReadOffset, 6.5);
     expect(restoredRemote.pageCount, 0, reason: '网络缓存不应进入完整备份');
+  });
+
+  test('网络挂载持久化连接状态、最后成功时间与友好错误', () async {
+    final network = NetworkRepository(database);
+    final source = await network.createSource(
+      name: '家庭 NAS',
+      type: NetworkSourceType.smb,
+      endpoint: 'smb://192.168.1.2/manga',
+      rootPath: 'comics',
+      username: 'reader',
+    );
+
+    await network.recordSourceFailure(
+      source.id,
+      state: NetworkConnectionState.needsAuthentication,
+      error: '账号或密码无效',
+    );
+    var restored = (await network.loadSources()).single;
+    expect(
+      restored.connectionState,
+      NetworkConnectionState.needsAuthentication,
+    );
+    expect(restored.lastError, '账号或密码无效');
+    expect(restored.lastSuccessAt, isNull);
+
+    await network.recordSourceSuccess(source.id, synced: true);
+    restored = (await network.loadSources()).single;
+    expect(restored.connectionState, NetworkConnectionState.connected);
+    expect(restored.lastError, isNull);
+    expect(restored.lastSuccessAt, isNotNull);
+    expect(restored.lastSyncAt, isNotNull);
   });
 
   test('多个漫画压缩包按选择队列与文件名自然顺序连续追加', () async {

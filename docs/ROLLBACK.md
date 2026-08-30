@@ -14,8 +14,8 @@ git push origin main --follow-tags
 发布稳定版本时创建注释标签：
 
 ```powershell
-git tag -a v1.1.0 -m "Private Shelf v1.1.0"
-git push origin v1.1.0
+git tag -a v1.2.0 -m "Private Shelf v1.2.0"
+git push origin v1.2.0
 ```
 
 ## 查看回退点
@@ -34,6 +34,8 @@ git tag --list
 - `checkpoint-network-mount-20260829`：网络挂载、只读缓存与设备验证完成点。
 - `v1.1.0`：压缩包、回收站、网络书库和升级兼容的完整发布版。
 - `backup-pre-editor-fix-20260830`：编辑页“选中删除保存”回归修复前的 v1.1.0 稳定点。
+- `backup-pre-v1.2-20260830`：v1.2 文件夹、快速定位、私密和备份强化实现前的回退点。
+- `v1.2.0`：三列分组书架、完整编辑、快速定位、私密阅读、CBZ 导出、文件关联和可卸载恢复备份的正式版。
 
 ## 安全回退：往下取版本
 
@@ -51,7 +53,7 @@ git switch -c codex/restore-v1.0.0 v1.0.0
 
 不要使用 `git reset --hard` 覆盖未提交修改。先用 `git status` 检查，必要时提交或暂存当前工作。
 
-Android 不允许把较低 `versionCode` 的 APK 直接覆盖到较高版本。需要在手机上回退功能时，必须基于目标旧源码构建一个使用相同签名、但 `versionCode` 高于手机当前版本的“前向回退 APK”；不要通过卸载 App 回退，因为卸载会清除私有数据。
+Android 不允许把较低 `versionCode` 的 APK 直接覆盖到较高版本。需要在手机上回退功能时，必须基于目标旧源码构建一个使用相同签名、但 `versionCode` 高于 3 的“前向回退 APK”；不要通过卸载 App 回退，因为卸载会清除私有数据。
 
 ## 手机数据回退
 
@@ -59,4 +61,4 @@ Android 不允许把较低 `versionCode` 的 APK 直接覆盖到较高版本。�
 
 私人漫画数据不会自动进入 GitHub。
 
-升级 APK 不会移动或重编码 `assets/`。v1 数据库首次升级到 v3 前会自动保留 `library.db.pre-v3`；完整书架的数据回退仍以升级前导出的 `.mangabackup` 为准。
+升级 APK 不会移动或重编码 `assets/`。v1.1 数据库首次升级到 schema 5 前会自动保留 `library.db.pre-v5`；完整书架的数据回退仍以升级前导出的 `.mangabackup` 为准。
