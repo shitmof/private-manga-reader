@@ -461,6 +461,20 @@ class AppController extends ChangeNotifier {
     return folder;
   }
 
+  Future<ShelfFolder> createShelfGroupFromComics({
+    required String sourceComicId,
+    required String targetComicId,
+    required String name,
+  }) async {
+    final folder = await _repository.createShelfGroupFromComics(
+      sourceComicId: sourceComicId,
+      targetComicId: targetComicId,
+      name: name,
+    );
+    await refresh();
+    return folder;
+  }
+
   Future<void> renameFolder(String folderId, String name) async {
     await _repository.renameFolder(folderId, name);
     await refresh();

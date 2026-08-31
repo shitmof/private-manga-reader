@@ -247,7 +247,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 24),
           const Center(
             child: Text(
-              '拾画阁 1.3.0',
+              '拾画阁 1.4.0',
               style: TextStyle(color: ShelfColors.muted, fontSize: 12),
             ),
           ),
@@ -257,7 +257,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _chooseImageGap(ReaderPreferences initial) async {
-    var value = initial.imageGap.round().clamp(8, 16);
+    var value = initial.imageGap.round().clamp(0, 10);
     final selected = await showModalBottomSheet<int>(
       context: context,
       showDragHandle: true,
@@ -279,16 +279,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 SegmentedButton<int>(
                   showSelectedIcon: false,
                   segments: const <ButtonSegment<int>>[
-                    ButtonSegment(value: 8, label: Text('紧凑 8')),
-                    ButtonSegment(value: 12, label: Text('标准 12')),
-                    ButtonSegment(value: 16, label: Text('宽松 16')),
+                    ButtonSegment(value: 0, label: Text('无缝 0')),
+                    ButtonSegment(value: 4, label: Text('窄缝 4')),
+                    ButtonSegment(value: 10, label: Text('舒适 10')),
                   ],
                   selected: <int>{
-                    value <= 10
-                        ? 8
-                        : value >= 14
-                        ? 16
-                        : 12,
+                    value <= 2
+                        ? 0
+                        : value >= 7
+                        ? 10
+                        : 4,
                   },
                   onSelectionChanged: (selection) =>
                       setSheetState(() => value = selection.first),
@@ -299,7 +299,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: <Widget>[
                     IconButton.filledTonal(
                       tooltip: '减小间距',
-                      onPressed: value <= 8
+                      onPressed: value <= 0
                           ? null
                           : () => setSheetState(() => value--),
                       icon: const Icon(Icons.remove_rounded),
@@ -314,7 +314,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     IconButton.filledTonal(
                       tooltip: '增大间距',
-                      onPressed: value >= 16
+                      onPressed: value >= 10
                           ? null
                           : () => setSheetState(() => value++),
                       icon: const Icon(Icons.add_rounded),

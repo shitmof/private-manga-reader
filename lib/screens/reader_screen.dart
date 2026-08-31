@@ -9,6 +9,8 @@ import '../models/entities.dart';
 import '../services/page_offset_index.dart';
 import '../services/privacy_service.dart';
 import '../state/app_controller.dart';
+import '../widgets/reader_edge_scrubber.dart';
+import '../widgets/reader_page_pill.dart';
 
 class ReaderScreen extends StatefulWidget {
   const ReaderScreen({
@@ -158,7 +160,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               onSettings: _showReaderSettings,
             ),
             if (!_loading && _items.length > 1)
-              _PageScrubber(
+              ReaderEdgeScrubber(
                 currentFraction: _scrubbing
                     ? _scrubFraction
                     : _offsetIndex.fractionForPage(_currentIndex),
@@ -166,7 +168,6 @@ class _ReaderScreenState extends State<ReaderScreen>
                     ? _offsetIndex.pageAtFraction(_scrubFraction) + 1
                     : _currentIndex + 1,
                 totalPages: _items.length,
-                active: _scrubbing,
                 onChangeStart: (fraction) => setState(() {
                   _scrubbing = true;
                   _scrubFraction = fraction;
@@ -180,13 +181,12 @@ class _ReaderScreenState extends State<ReaderScreen>
                   setState(() => _scrubbing = false);
                 },
               ),
-            _ReaderBottomBar(
+            ReaderPagePill(
               visible:
                   _controlsVisible &&
                   widget.controller.preferences.showPageNumber,
               current: _items.isEmpty ? 0 : _currentIndex + 1,
               total: _items.length,
-              onPageChanged: (page) => _jumpToPage(page - 1),
             ),
           ],
         ),
@@ -478,192 +478,6 @@ class _ReaderTopBar extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _ReaderBottomBar extends StatelessWidget {
-  const _ReaderBottomBar({
-    required this.visible,
-    required this.current,
-    required this.total,
-    required this.onPageChanged,
-  });
-
-  final bool visible;
-  final int current;
-  final int total;
-  final ValueChanged<int> onPageChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: AnimatedSlide(
-        offset: visible ? Offset.zero : const Offset(0, 1),
-        duration: const Duration(milliseconds: 180),
-        child: AnimatedOpacity(
-          opacity: visible ? 1 : 0,
-          duration: const Duration(milliseconds: 160),
-          child: IgnorePointer(
-            ignoring: !visible,
-            child: Container(
-              color: const Color(0xE6111418),
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 13,
-                  ),
-                  child: Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: Slider(
-                          value: total <= 1 ? 1 : current.toDouble(),
-                          min: 1,
-                          max: total <= 1 ? 1 : total.toDouble(),
-                          divisions: total <= 1 ? null : total - 1,
-                          onChanged: total <= 1
-                              ? null
-                              : (value) => onPageChanged(value.round()),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Text(
-                        '$current / $total',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PageScrubber extends StatelessWidget {
-  const _PageScrubber({
-    required this.currentFraction,
-    required this.currentPage,
-    required this.totalPages,
-    required this.active,
-    required this.onChangeStart,
-    required this.onChanged,
-    required this.onChangeEnd,
-  });
-
-  final double currentFraction;
-  final int currentPage;
-  final int totalPages;
-  final bool active;
-  final ValueChanged<double> onChangeStart;
-  final ValueChanged<double> onChanged;
-  final ValueChanged<double> onChangeEnd;
-
-  @override
-  Widget build(BuildContext context) {
-    return Positioned(
-      right: 2,
-      top: MediaQuery.paddingOf(context).top + 74,
-      bottom: MediaQuery.paddingOf(context).bottom + 82,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          double fraction(Offset globalPosition) {
-            final box = context.findRenderObject()! as RenderBox;
-            return (box.globalToLocal(globalPosition).dy /
-                    constraints.maxHeight)
-                .clamp(0, 1);
-          }
-
-          return GestureDetector(
-            key: const ValueKey<String>('reader-fast-scrubber'),
-            behavior: HitTestBehavior.opaque,
-            onVerticalDragStart: (details) =>
-                onChangeStart(fraction(details.globalPosition)),
-            onVerticalDragUpdate: (details) =>
-                onChanged(fraction(details.globalPosition)),
-            onVerticalDragEnd: (_) => onChangeEnd(currentFraction),
-            onTapDown: (details) {
-              final value = fraction(details.globalPosition);
-              onChangeStart(value);
-              onChanged(value);
-              onChangeEnd(value);
-            },
-            child: SizedBox(
-              width: 48,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: <Widget>[
-                  Positioned(
-                    right: 8,
-                    top: 0,
-                    bottom: 0,
-                    child: Container(
-                      width: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.white24,
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    right: 3,
-                    top:
-                        (constraints.maxHeight - 18) *
-                        currentFraction.clamp(0, 1),
-                    child: Container(
-                      width: 14,
-                      height: 18,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF78ADE5),
-                        borderRadius: BorderRadius.circular(7),
-                        boxShadow: const <BoxShadow>[
-                          BoxShadow(color: Colors.black45, blurRadius: 4),
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (active)
-                    Positioned(
-                      right: 24,
-                      top:
-                          ((constraints.maxHeight - 42) *
-                                  currentFraction.clamp(0, 1))
-                              .clamp(0, constraints.maxHeight - 42),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xE6111418),
-                          borderRadius: BorderRadius.circular(9),
-                        ),
-                        child: Text(
-                          '$currentPage / $totalPages',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          );
-        },
       ),
     );
   }

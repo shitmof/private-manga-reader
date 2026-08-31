@@ -235,4 +235,389 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
+
+  testWidgets('主书架直接把一本漫画拖到另一本会询问并合成四宫格书单', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final sandbox = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('shelf-group-drag-test-'),
+    ))!;
+    final database = AppDatabase(
+      factory: databaseFactoryFfi,
+      overridePath: p.join(sandbox.path, 'library.db'),
+    );
+    final repository = LibraryRepository(database);
+    final storage = StorageService(
+      rootOverride: Directory(p.join(sandbox.path, 'files')),
+    );
+    await tester.runAsync(storage.initialize);
+    final importer = ImportService(repository, storage);
+    final archiveImporter = ArchiveImportService(repository, storage, importer);
+    final networkRepository = NetworkRepository(database);
+    final networkLibrary = NetworkLibraryService(
+      networkRepository,
+      storage,
+      archiveImporter,
+      MemoryNetworkCredentialStore(),
+    );
+    final controller = AppController(
+      repository,
+      storage,
+      importer,
+      archiveImporter,
+      BackupService(repository, storage),
+      networkRepository,
+      networkLibrary,
+      privacyAuthenticator: const AllowPrivacyAuthenticator(),
+    );
+    addTearDown(() async {
+      await networkLibrary.dispose();
+      await database.close();
+      if (await sandbox.exists()) await sandbox.delete(recursive: true);
+    });
+
+    late String sourceId;
+    late String targetId;
+    await tester.runAsync(() async {
+      sourceId = (await repository.createComic('拖动来源')).id;
+      targetId = (await repository.createComic('合组目标')).id;
+      await repository.createComic('未参与漫画');
+      await controller.initialize();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildShelfTheme(Brightness.light),
+        home: LibraryScreen(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final source = find.byKey(ValueKey<String>('shelf-entry-comic:$sourceId'));
+    final target = find.byKey(ValueKey<String>('shelf-entry-comic:$targetId'));
+    final gesture = await tester.startGesture(tester.getCenter(source));
+    await tester.pump(const Duration(milliseconds: 600));
+    await gesture.moveTo(tester.getCenter(target));
+    await tester.pump(const Duration(milliseconds: 700));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(find.text('合成书单'), findsOneWidget);
+    expect(find.text('是否将《拖动来源》和《合组目标》合成一个书单？'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, '取消'));
+    await tester.pumpAndSettle();
+    expect(controller.folders, isEmpty);
+    expect(controller.summaryFor(sourceId)!.comic.folderId, isNull);
+    expect(controller.summaryFor(targetId)!.comic.folderId, isNull);
+
+    final confirmGesture = await tester.startGesture(tester.getCenter(source));
+    await tester.pump(const Duration(milliseconds: 600));
+    await confirmGesture.moveTo(tester.getCenter(target));
+    await tester.pump(const Duration(milliseconds: 700));
+    await confirmGesture.up();
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '合成'));
+    await tester.pumpAndSettle();
+    for (var attempt = 0; attempt < 40; attempt++) {
+      if (controller.folders.isNotEmpty &&
+          controller.shelfEntries.any(
+            (entry) => entry.key.startsWith('folder:'),
+          )) {
+        break;
+      }
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 25)),
+      );
+      await tester.pump();
+    }
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(controller.folders, hasLength(1));
+    expect(controller.folders.single.name, '新建书单');
+    expect(find.text('新建书单'), findsOneWidget);
+    for (var index = 0; index < 4; index++) {
+      expect(
+        find.byKey(ValueKey<String>('folder-mosaic-slot-$index')),
+        findsOneWidget,
+      );
+    }
+  });
+
+  testWidgets('拖动漫画靠近书架底边会自动向下滚动', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final sandbox = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('shelf-edge-scroll-test-'),
+    ))!;
+    final database = AppDatabase(
+      factory: databaseFactoryFfi,
+      overridePath: p.join(sandbox.path, 'library.db'),
+    );
+    final repository = LibraryRepository(database);
+    final storage = StorageService(
+      rootOverride: Directory(p.join(sandbox.path, 'files')),
+    );
+    await tester.runAsync(storage.initialize);
+    final importer = ImportService(repository, storage);
+    final archiveImporter = ArchiveImportService(repository, storage, importer);
+    final networkRepository = NetworkRepository(database);
+    final networkLibrary = NetworkLibraryService(
+      networkRepository,
+      storage,
+      archiveImporter,
+      MemoryNetworkCredentialStore(),
+    );
+    final controller = AppController(
+      repository,
+      storage,
+      importer,
+      archiveImporter,
+      BackupService(repository, storage),
+      networkRepository,
+      networkLibrary,
+      privacyAuthenticator: const AllowPrivacyAuthenticator(),
+    );
+    addTearDown(() async {
+      await networkLibrary.dispose();
+      await database.close();
+      if (await sandbox.exists()) await sandbox.delete(recursive: true);
+    });
+
+    late String firstId;
+    await tester.runAsync(() async {
+      firstId = (await repository.createComic('第 1 本')).id;
+      for (var index = 2; index <= 40; index++) {
+        await repository.createComic('第 $index 本');
+      }
+      await controller.initialize();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildShelfTheme(Brightness.light),
+        home: LibraryScreen(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final grid = find.byKey(
+      const ValueKey<String>('library-three-column-grid'),
+    );
+    final scrollable = find.descendant(
+      of: grid,
+      matching: find.byType(Scrollable),
+    );
+    final position = tester.state<ScrollableState>(scrollable).position;
+    expect(position.pixels, 0);
+
+    final first = find.byKey(ValueKey<String>('shelf-entry-comic:$firstId'));
+    final gesture = await tester.startGesture(tester.getCenter(first));
+    await tester.pump(const Duration(milliseconds: 600));
+    await gesture.moveTo(const Offset(180, 700));
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(position.pixels, greaterThan(0));
+    await gesture.cancel();
+  });
+
+  testWidgets('主书架无需进入整理模式即可拖动漫画并持久化顺序', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final sandbox = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('shelf-direct-reorder-test-'),
+    ))!;
+    final database = AppDatabase(
+      factory: databaseFactoryFfi,
+      overridePath: p.join(sandbox.path, 'library.db'),
+    );
+    final repository = LibraryRepository(database);
+    final storage = StorageService(
+      rootOverride: Directory(p.join(sandbox.path, 'files')),
+    );
+    await tester.runAsync(storage.initialize);
+    final importer = ImportService(repository, storage);
+    final archiveImporter = ArchiveImportService(repository, storage, importer);
+    final networkRepository = NetworkRepository(database);
+    final networkLibrary = NetworkLibraryService(
+      networkRepository,
+      storage,
+      archiveImporter,
+      MemoryNetworkCredentialStore(),
+    );
+    final controller = AppController(
+      repository,
+      storage,
+      importer,
+      archiveImporter,
+      BackupService(repository, storage),
+      networkRepository,
+      networkLibrary,
+      privacyAuthenticator: const AllowPrivacyAuthenticator(),
+    );
+    addTearDown(() async {
+      await networkLibrary.dispose();
+      await database.close();
+      if (await sandbox.exists()) await sandbox.delete(recursive: true);
+    });
+
+    late String firstId;
+    late String secondId;
+    late String thirdId;
+    await tester.runAsync(() async {
+      firstId = (await repository.createComic('第一本')).id;
+      secondId = (await repository.createComic('第二本')).id;
+      thirdId = (await repository.createComic('第三本')).id;
+      await controller.initialize();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildShelfTheme(Brightness.light),
+        home: LibraryScreen(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('整理书架'), findsNothing);
+
+    final source = find.byKey(ValueKey<String>('shelf-entry-comic:$thirdId'));
+    final target = find.byKey(ValueKey<String>('shelf-entry-comic:$firstId'));
+    final targetRect = tester.getRect(target);
+    final gesture = await tester.startGesture(tester.getCenter(source));
+    await tester.pump(const Duration(milliseconds: 600));
+    await gesture.moveTo(
+      Offset(targetRect.center.dx, targetRect.top + targetRect.height * 0.92),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    for (var attempt = 0; attempt < 40; attempt++) {
+      final rootEntries = controller.shelfEntries
+          .where((entry) => entry.scope == 'root')
+          .toList();
+      if (rootEntries.isNotEmpty && rootEntries.first.entityId == thirdId) {
+        break;
+      }
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 25)),
+      );
+      await tester.pump();
+    }
+
+    expect(
+      controller.shelfEntries
+          .where((entry) => entry.scope == 'root')
+          .map((entry) => entry.entityId),
+      <String>[thirdId, firstId, secondId],
+    );
+    final persisted = await tester.runAsync(repository.loadShelfEntries);
+    expect(
+      persisted!
+          .where((entry) => entry.scope == 'root')
+          .map((entry) => entry.entityId)
+          .take(2),
+      <String>[thirdId, firstId],
+    );
+  });
+
+  testWidgets('拖入已有书单必须先确认且取消不改变漫画归属', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final sandbox = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('shelf-add-group-test-'),
+    ))!;
+    final database = AppDatabase(
+      factory: databaseFactoryFfi,
+      overridePath: p.join(sandbox.path, 'library.db'),
+    );
+    final repository = LibraryRepository(database);
+    final storage = StorageService(
+      rootOverride: Directory(p.join(sandbox.path, 'files')),
+    );
+    await tester.runAsync(storage.initialize);
+    final importer = ImportService(repository, storage);
+    final archiveImporter = ArchiveImportService(repository, storage, importer);
+    final networkRepository = NetworkRepository(database);
+    final networkLibrary = NetworkLibraryService(
+      networkRepository,
+      storage,
+      archiveImporter,
+      MemoryNetworkCredentialStore(),
+    );
+    final controller = AppController(
+      repository,
+      storage,
+      importer,
+      archiveImporter,
+      BackupService(repository, storage),
+      networkRepository,
+      networkLibrary,
+      privacyAuthenticator: const AllowPrivacyAuthenticator(),
+    );
+    addTearDown(() async {
+      await networkLibrary.dispose();
+      await database.close();
+      if (await sandbox.exists()) await sandbox.delete(recursive: true);
+    });
+
+    late String comicId;
+    late String folderId;
+    await tester.runAsync(() async {
+      comicId = (await repository.createComic('待加入漫画')).id;
+      folderId = (await repository.createFolder('周末书单')).id;
+      await controller.initialize();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildShelfTheme(Brightness.light),
+        home: LibraryScreen(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final source = find.byKey(ValueKey<String>('shelf-entry-comic:$comicId'));
+    final target = find.byKey(ValueKey<String>('shelf-entry-folder:$folderId'));
+    final gesture = await tester.startGesture(tester.getCenter(source));
+    await tester.pump(const Duration(milliseconds: 600));
+    await gesture.moveTo(tester.getCenter(target));
+    await tester.pump(const Duration(milliseconds: 700));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(find.text('加入书单'), findsOneWidget);
+    expect(find.text('是否将《待加入漫画》加入《周末书单》？'), findsOneWidget);
+    expect(controller.summaryFor(comicId)!.comic.folderId, isNull);
+    await tester.tap(find.widgetWithText(TextButton, '取消'));
+    await tester.pumpAndSettle();
+    expect(controller.summaryFor(comicId)!.comic.folderId, isNull);
+
+    final secondGesture = await tester.startGesture(tester.getCenter(source));
+    await tester.pump(const Duration(milliseconds: 600));
+    await secondGesture.moveTo(tester.getCenter(target));
+    await tester.pump(const Duration(milliseconds: 700));
+    await secondGesture.up();
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '加入'));
+    await tester.pumpAndSettle();
+    for (var attempt = 0; attempt < 40; attempt++) {
+      if (controller.summaryFor(comicId)?.comic.folderId == folderId) break;
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 25)),
+      );
+      await tester.pump();
+    }
+    expect(controller.summaryFor(comicId)!.comic.folderId, folderId);
+  });
 }

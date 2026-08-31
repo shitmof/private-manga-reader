@@ -11,7 +11,7 @@ class AppDatabase {
   final DatabaseFactory _factory;
   final String? overridePath;
   Database? _database;
-  static const schemaVersion = 6;
+  static const schemaVersion = 7;
 
   Future<Database> get instance async {
     final existing = _database;
@@ -155,6 +155,13 @@ class AppDatabase {
       await _ensureRemotePageSourceColumns(db);
       await _createShelfEntrySchema(db);
       await _populateShelfEntries(db);
+    }
+    if (oldVersion < 7) {
+      // V1.3 的 10dp 是内置默认值，会在长图之间形成明显横线。
+      // 只在数据库升级时迁移一次，不触碰漫画、顺序、挂载或阅读记录。
+      await db.update('settings', <String, Object?>{
+        'value': '0.0',
+      }, where: "key = 'image_gap' AND value IN ('10', '10.0')");
     }
   }
 

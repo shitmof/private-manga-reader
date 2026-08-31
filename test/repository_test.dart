@@ -51,6 +51,47 @@ void main() {
     if (await sandbox.exists()) await sandbox.delete(recursive: true);
   });
 
+  test('全新安装默认采用无缝阅读', () async {
+    expect(const ReaderPreferences().imageGap, 0);
+    expect((await repository.loadPreferences()).imageGap, 0);
+  });
+
+  test('v6 升级仅迁移旧版默认图片间距并保留其他设置', () async {
+    final path = p.join(sandbox.path, 'legacy-v6-gap.db');
+    final legacy = await databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 6,
+        onCreate: (db, version) async {
+          await db.execute(
+            'CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+          );
+        },
+      ),
+    );
+    await legacy.insert('settings', <String, Object?>{
+      'key': 'image_gap',
+      'value': '10.0',
+    });
+    await legacy.insert('settings', <String, Object?>{
+      'key': 'reader_brightness',
+      'value': '0.46',
+    });
+    await legacy.close();
+
+    final migratedDatabase = AppDatabase(
+      factory: databaseFactoryFfi,
+      overridePath: path,
+    );
+    final migratedRepository = LibraryRepository(migratedDatabase);
+    final preferences = await migratedRepository.loadPreferences();
+
+    expect(preferences.imageGap, 0);
+    expect(preferences.readerBrightness, 0.46);
+    expect(File('$path.pre-v7').existsSync(), isTrue);
+    await migratedDatabase.close();
+  });
+
   test('原图导入前后哈希一致，删除源文件后私有副本仍存在', () async {
     final comic = await repository.createComic('哈希测试');
     final source = await _createPng(sandbox, 'source.png');
@@ -284,6 +325,27 @@ void main() {
       'folder:${folder.id}',
       'comic:${first.id}',
     ]);
+  });
+
+  test('两本漫画可原子合成书单并由书单替代目标漫画位置', () async {
+    final source = await repository.createComic('拖动来源');
+    final target = await repository.createComic('合组目标');
+    final untouched = await repository.createComic('保持相对顺序');
+
+    final folder = await repository.createShelfGroupFromComics(
+      sourceComicId: source.id,
+      targetComicId: target.id,
+      name: '新建书单',
+    );
+
+    expect(folder.name, '新建书单');
+    expect((await repository.getComic(source.id))?.comic.folderId, folder.id);
+    expect((await repository.getComic(target.id))?.comic.folderId, folder.id);
+    expect((await repository.getComic(untouched.id))?.comic.folderId, isNull);
+    expect(
+      (await repository.loadShelfEntries()).map((entry) => entry.key),
+      <String>['folder:${folder.id}', 'comic:${untouched.id}'],
+    );
   });
 
   test('私密文件夹可整体锁定，删除分组后内容仍保持私密', () async {

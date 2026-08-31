@@ -276,7 +276,7 @@ class LibraryStats {
 
 class ReaderPreferences {
   const ReaderPreferences({
-    this.imageGap = 10,
+    this.imageGap = 0,
     this.showPageNumber = true,
     this.rememberProgress = true,
     this.readerBrightness = 0.72,

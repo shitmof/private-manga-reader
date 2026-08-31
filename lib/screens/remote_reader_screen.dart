@@ -8,6 +8,8 @@ import 'package:flutter/rendering.dart';
 import '../models/entities.dart';
 import '../services/page_offset_index.dart';
 import '../state/app_controller.dart';
+import '../widgets/reader_edge_scrubber.dart';
+import '../widgets/reader_page_pill.dart';
 
 class RemoteReaderScreen extends StatefulWidget {
   const RemoteReaderScreen({
@@ -29,6 +31,8 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
   List<RemotePage> _pages = const <RemotePage>[];
   bool _loading = true;
   bool _controlsVisible = false;
+  bool _scrubbing = false;
+  double _scrubFraction = 0;
   int _currentIndex = 0;
   double _lastLayoutWidth = 0;
   PageOffsetIndex _offsetIndex = PageOffsetIndex.fromExtents(
@@ -89,34 +93,27 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
                 child: CircularProgressIndicator(color: Colors.white),
               )
             else
-              Scrollbar(
+              ListView.builder(
                 controller: _scrollController,
-                interactive: true,
-                thumbVisibility: true,
-                thickness: 6,
-                radius: const Radius.circular(3),
-                child: ListView.builder(
-                  controller: _scrollController,
-                  padding: EdgeInsets.zero,
-                  scrollCacheExtent: const ScrollCacheExtent.pixels(1200),
-                  itemCount: _pages.length,
-                  itemBuilder: (context, index) {
-                    final page = _pages[index];
-                    return Padding(
-                      padding: EdgeInsets.only(
-                        bottom: index == _pages.length - 1 ? 0 : gap,
+                padding: EdgeInsets.zero,
+                scrollCacheExtent: const ScrollCacheExtent.pixels(1200),
+                itemCount: _pages.length,
+                itemBuilder: (context, index) {
+                  final page = _pages[index];
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      bottom: index == _pages.length - 1 ? 0 : gap,
+                    ),
+                    child: GestureDetector(
+                      onDoubleTap: () => _showZoom(page),
+                      child: SizedBox(
+                        width: width,
+                        height: _displayHeight(page, width),
+                        child: _pageImage(page, width),
                       ),
-                      child: GestureDetector(
-                        onDoubleTap: () => _showZoom(page),
-                        child: SizedBox(
-                          width: width,
-                          height: _displayHeight(page, width),
-                          child: _pageImage(page, width),
-                        ),
-                      ),
-                    );
-                  },
-                ),
+                    ),
+                  );
+                },
               ),
             _RemoteReaderTopBar(
               visible: _controlsVisible,
@@ -128,13 +125,32 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
                 curve: Curves.easeOutCubic,
               ),
             ),
-            _RemoteReaderBottomBar(
+            if (_pages.length > 1)
+              ReaderEdgeScrubber(
+                currentFraction: _scrubbing
+                    ? _scrubFraction
+                    : _offsetIndex.fractionForPage(_currentIndex),
+                currentPage: _pages.isEmpty ? 0 : _currentIndex + 1,
+                totalPages: _pages.length,
+                onChangeStart: (fraction) => setState(() {
+                  _scrubbing = true;
+                  _scrubFraction = fraction;
+                }),
+                onChanged: (fraction) {
+                  setState(() => _scrubFraction = fraction);
+                  _jumpToPage(_offsetIndex.pageAtFraction(fraction));
+                },
+                onChangeEnd: (fraction) {
+                  _jumpToPage(_offsetIndex.pageAtFraction(fraction));
+                  setState(() => _scrubbing = false);
+                },
+              ),
+            ReaderPagePill(
               visible:
                   _controlsVisible &&
                   widget.controller.preferences.showPageNumber,
               current: _pages.isEmpty ? 0 : _currentIndex + 1,
               total: _pages.length,
-              onPageChanged: _jumpToPage,
             ),
           ],
         ),
@@ -386,74 +402,6 @@ class _RemoteReaderTopBar extends StatelessWidget {
                       ],
                     ),
                   ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _RemoteReaderBottomBar extends StatelessWidget {
-  const _RemoteReaderBottomBar({
-    required this.visible,
-    required this.current,
-    required this.total,
-    required this.onPageChanged,
-  });
-
-  final bool visible;
-  final int current;
-  final int total;
-  final ValueChanged<int> onPageChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: AnimatedSlide(
-        offset: visible ? Offset.zero : const Offset(0, 1),
-        duration: const Duration(milliseconds: 180),
-        child: AnimatedOpacity(
-          opacity: visible ? 1 : 0,
-          duration: const Duration(milliseconds: 160),
-          child: IgnorePointer(
-            ignoring: !visible,
-            child: Container(
-              color: const Color(0xE6111418),
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 13,
-                  ),
-                  child: Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: Slider(
-                          value: total <= 1 ? 0 : (current - 1).toDouble(),
-                          min: 0,
-                          max: total <= 1 ? 0 : (total - 1).toDouble(),
-                          divisions: total <= 1 ? null : total - 1,
-                          onChanged: total <= 1
-                              ? null
-                              : (value) => onPageChanged(value.round()),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Text(
-                        '$current / $total',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
                 ),
               ),
             ),

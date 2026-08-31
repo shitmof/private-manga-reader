@@ -257,6 +257,133 @@ class LibraryRepository {
     return folder;
   }
 
+  Future<ShelfFolder> createShelfGroupFromComics({
+    required String sourceComicId,
+    required String targetComicId,
+    required String name,
+  }) async {
+    final normalized = name.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError.value(name, 'name', '书单名称不能为空');
+    }
+    if (sourceComicId == targetComicId) {
+      throw ArgumentError.value(sourceComicId, 'sourceComicId', '不能合并同一本漫画');
+    }
+    final db = await _database.instance;
+    return db.transaction((txn) async {
+      await _repairShelfEntries(txn);
+      final comicRows = await txn.query(
+        'comics',
+        columns: <String>['id', 'folder_id', 'is_private'],
+        where: 'id IN (?, ?) AND deleted_at IS NULL',
+        whereArgs: <Object?>[sourceComicId, targetComicId],
+      );
+      if (comicRows.length != 2) throw StateError('待合并的漫画不存在');
+      final byId = <String, Map<String, Object?>>{
+        for (final row in comicRows) row['id']! as String: row,
+      };
+      final source = byId[sourceComicId]!;
+      final target = byId[targetComicId]!;
+      if (source['folder_id'] != null || target['folder_id'] != null) {
+        throw StateError('只能合并主书架中的漫画');
+      }
+      final sourcePrivate = (source['is_private'] as int? ?? 0) == 1;
+      final targetPrivate = (target['is_private'] as int? ?? 0) == 1;
+      if (sourcePrivate != targetPrivate) {
+        throw StateError('只能合并同一书架区域中的漫画');
+      }
+      final isPrivate = sourcePrivate || targetPrivate;
+      final scope = isPrivate ? 'private' : 'root';
+      final shelfRows = await txn.query(
+        'shelf_entries',
+        columns: <String>['entity_type', 'entity_id'],
+        where: 'scope = ?',
+        whereArgs: <Object?>[scope],
+        orderBy: 'sort_index, created_at',
+      );
+      final sourceKey = 'comic:$sourceComicId';
+      final targetKey = 'comic:$targetComicId';
+      final currentKeys = shelfRows
+          .map((row) => '${row['entity_type']}:${row['entity_id']}')
+          .toList();
+      final sourceIndex = currentKeys.indexOf(sourceKey);
+      final targetIndex = currentKeys.indexOf(targetKey);
+      if (sourceIndex < 0 || targetIndex < 0) {
+        throw StateError('待合并的漫画不在当前书架');
+      }
+
+      final now = DateTime.now().toUtc();
+      final indexRows = await txn.rawQuery(
+        'SELECT COALESCE(MAX(sort_index), -1) + 1 AS next_index '
+        'FROM shelf_folders',
+      );
+      final folder = ShelfFolder(
+        id: _uuid.v4(),
+        name: normalized,
+        sortIndex: indexRows.first['next_index']! as int,
+        createdAt: now,
+        updatedAt: now,
+        isPrivate: isPrivate,
+      );
+      final timestamp = now.toIso8601String();
+      await txn.insert('shelf_folders', <String, Object?>{
+        'id': folder.id,
+        'name': folder.name,
+        'is_private': isPrivate ? 1 : 0,
+        'sort_index': folder.sortIndex,
+        'created_at': timestamp,
+        'updated_at': timestamp,
+      });
+      for (final comicId in <String>[sourceComicId, targetComicId]) {
+        await txn.update(
+          'comics',
+          <String, Object?>{
+            'folder_id': folder.id,
+            'is_private': 0,
+            'updated_at': timestamp,
+          },
+          where: 'id = ? AND deleted_at IS NULL',
+          whereArgs: <Object?>[comicId],
+        );
+        await txn.delete(
+          'shelf_entries',
+          where: 'entity_type = ? AND entity_id = ?',
+          whereArgs: <Object?>['comic', comicId],
+        );
+      }
+
+      final orderedKeys = currentKeys
+          .where((key) => key != sourceKey && key != targetKey)
+          .toList();
+      final insertionIndex = (targetIndex - (sourceIndex < targetIndex ? 1 : 0))
+          .clamp(0, orderedKeys.length);
+      final folderKey = 'folder:${folder.id}';
+      orderedKeys.insert(insertionIndex, folderKey);
+      await txn.insert('shelf_entries', <String, Object?>{
+        'entity_type': 'folder',
+        'entity_id': folder.id,
+        'scope': scope,
+        'sort_index': insertionIndex,
+        'created_at': timestamp,
+        'updated_at': timestamp,
+      });
+      for (var index = 0; index < orderedKeys.length; index++) {
+        final separator = orderedKeys[index].indexOf(':');
+        await txn.update(
+          'shelf_entries',
+          <String, Object?>{'sort_index': index, 'updated_at': timestamp},
+          where: 'entity_type = ? AND entity_id = ? AND scope = ?',
+          whereArgs: <Object?>[
+            orderedKeys[index].substring(0, separator),
+            orderedKeys[index].substring(separator + 1),
+            scope,
+          ],
+        );
+      }
+      return folder;
+    });
+  }
+
   Future<void> moveComicsToFolder(
     List<String> comicIds,
     String? folderId,
@@ -842,7 +969,7 @@ class LibraryRepository {
     };
     final themeName = values['theme'] ?? AppThemePreference.system.name;
     return ReaderPreferences(
-      imageGap: double.tryParse(values['image_gap'] ?? '') ?? 10,
+      imageGap: double.tryParse(values['image_gap'] ?? '') ?? 0,
       showPageNumber: values['show_page_number'] != 'false',
       rememberProgress: values['remember_progress'] != 'false',
       readerBrightness:
