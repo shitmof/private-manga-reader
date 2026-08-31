@@ -172,6 +172,23 @@ class _LibraryScreenState extends State<LibraryScreen>
 
   Future<void> _reorderShelf(String fromKey, String toKey) async {
     if (fromKey == toKey || !mounted) return;
+    final folderId = _folderId;
+    if (folderId != null) {
+      final orderedIds = controller.library
+          .where((summary) => summary.comic.folderId == folderId)
+          .map((summary) => summary.comic.id)
+          .toList();
+      final fromId = fromKey.replaceFirst('comic:', '');
+      final toId = toKey.replaceFirst('comic:', '');
+      final from = orderedIds.indexOf(fromId);
+      final to = orderedIds.indexOf(toId);
+      if (from < 0 || to < 0) return;
+      final moved = orderedIds.removeAt(from);
+      orderedIds.insert(to, moved);
+      await controller.reorderComicIds(orderedIds);
+      return;
+    }
+    if (_readingListId != null) return;
     final scope = _scope == _LibraryScope.private ? 'private' : 'root';
     final ordered = controller.shelfEntries
         .where((entry) => entry.scope == scope)
@@ -411,6 +428,13 @@ class _LibraryScreenState extends State<LibraryScreen>
                           selectedIds: _selectedIds,
                           selectionMode: _selectionMode,
                           organizeMode: _organizeMode,
+                          activeFolderId: _folderId,
+                          dragEnabled: _readingListId == null,
+                          groupingEnabled:
+                              _folderId == null &&
+                              _readingListId == null &&
+                              (_scope == _LibraryScope.all ||
+                                  _scope == _LibraryScope.private),
                           onComicTap: _openComic,
                           onComicToggle: _toggleComic,
                           onMoveComicToFolder: _confirmAddComicToShelfGroup,
@@ -419,6 +443,8 @@ class _LibraryScreenState extends State<LibraryScreen>
                           onFolderMenu: _showFolderMenu,
                           onReorder: _reorderShelf,
                           onCreateGroup: _confirmCreateShelfGroup,
+                          onMoveComicToRoot: (comicId) => controller
+                              .moveComicsToFolder(<String>[comicId], null),
                         ),
                 ),
               ],
@@ -979,6 +1005,9 @@ class _LibraryGrid extends StatefulWidget {
     required this.selectedIds,
     required this.selectionMode,
     required this.organizeMode,
+    required this.activeFolderId,
+    required this.dragEnabled,
+    required this.groupingEnabled,
     required this.onComicTap,
     required this.onComicToggle,
     required this.onMoveComicToFolder,
@@ -986,6 +1015,7 @@ class _LibraryGrid extends StatefulWidget {
     required this.onFolderMenu,
     required this.onReorder,
     required this.onCreateGroup,
+    required this.onMoveComicToRoot,
   });
 
   final AppController controller;
@@ -995,6 +1025,9 @@ class _LibraryGrid extends StatefulWidget {
   final Set<String> selectedIds;
   final bool selectionMode;
   final bool organizeMode;
+  final String? activeFolderId;
+  final bool dragEnabled;
+  final bool groupingEnabled;
   final ValueChanged<ComicSummary> onComicTap;
   final ValueChanged<String> onComicToggle;
   final void Function(String comicId, String folderId) onMoveComicToFolder;
@@ -1002,6 +1035,7 @@ class _LibraryGrid extends StatefulWidget {
   final ValueChanged<ShelfFolder> onFolderMenu;
   final void Function(String fromKey, String toKey) onReorder;
   final void Function(String sourceComicId, String targetComicId) onCreateGroup;
+  final ValueChanged<String> onMoveComicToRoot;
 
   @override
   State<_LibraryGrid> createState() => _LibraryGridState();
@@ -1011,6 +1045,7 @@ class _LibraryGridState extends State<_LibraryGrid> {
   final ScrollController _scrollController = ScrollController();
   Timer? _autoScrollTimer;
   double _autoScrollStep = 0;
+  ShelfEntry? _activeDrag;
 
   @override
   void dispose() {
@@ -1062,6 +1097,16 @@ class _LibraryGridState extends State<_LibraryGrid> {
     _autoScrollTimer = null;
   }
 
+  void _startDrag(ShelfEntry entry) {
+    HapticFeedback.selectionClick();
+    setState(() => _activeDrag = entry);
+  }
+
+  void _finishDrag() {
+    _stopAutoScroll();
+    if (mounted && _activeDrag != null) setState(() => _activeDrag = null);
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
@@ -1078,80 +1123,95 @@ class _LibraryGridState extends State<_LibraryGrid> {
     final onFolderMenu = widget.onFolderMenu;
     final onReorder = widget.onReorder;
     final onCreateGroup = widget.onCreateGroup;
-    return Scrollbar(
-      controller: _scrollController,
-      interactive: true,
-      thickness: 5,
-      radius: const Radius.circular(3),
-      child: GridView.builder(
-        key: const ValueKey<String>('library-three-column-grid'),
-        controller: _scrollController,
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 104),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          crossAxisSpacing: 9,
-          mainAxisSpacing: 18,
-          childAspectRatio: 0.57,
-        ),
-        itemCount: entries.length,
-        itemBuilder: (context, index) {
-          final entry = entries[index];
-          final Widget card;
-          if (entry.kind == ShelfEntryKind.folder) {
-            final folder = folders.firstWhere(
-              (item) => item.id == entry.entityId,
-            );
-            final contents = controller.library
-                .where((summary) => summary.comic.folderId == folder.id)
-                .toList();
-            card = _FolderCard(
-              key: ValueKey<String>('shelf-entry-${entry.key}'),
-              controller: controller,
-              folder: folder,
-              contents: contents,
-              organizeMode: organizeMode,
-              onTap: () => onFolderTap(folder),
-              onMenu: () => onFolderMenu(folder),
-            );
-          } else {
-            final summary = comics.firstWhere(
-              (item) => item.comic.id == entry.entityId,
-            );
-            final selected = selectedIds.contains(summary.comic.id);
-            card = _ComicCard(
-              key: ValueKey<String>('shelf-entry-${entry.key}'),
-              controller: controller,
-              summary: summary,
-              selected: selected,
-              selectionMode: selectionMode,
-              organizeMode: organizeMode,
-              onTap: () => onComicTap(summary),
-              onToggle: () => onComicToggle(summary.comic.id),
-            );
-          }
-          if (selectionMode) return card;
+    return Stack(
+      children: <Widget>[
+        Positioned.fill(
+          child: Scrollbar(
+            controller: _scrollController,
+            interactive: true,
+            thickness: 5,
+            radius: const Radius.circular(3),
+            child: GridView.builder(
+              key: const ValueKey<String>('library-three-column-grid'),
+              controller: _scrollController,
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 104),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 9,
+                mainAxisSpacing: 18,
+                childAspectRatio: 0.57,
+              ),
+              itemCount: entries.length,
+              itemBuilder: (context, index) {
+                final entry = entries[index];
+                final Widget card;
+                if (entry.kind == ShelfEntryKind.folder) {
+                  final folder = folders.firstWhere(
+                    (item) => item.id == entry.entityId,
+                  );
+                  final contents = controller.library
+                      .where((summary) => summary.comic.folderId == folder.id)
+                      .toList();
+                  card = _FolderCard(
+                    key: ValueKey<String>('shelf-entry-${entry.key}'),
+                    controller: controller,
+                    folder: folder,
+                    contents: contents,
+                    organizeMode: organizeMode,
+                    onTap: () => onFolderTap(folder),
+                    onMenu: () => onFolderMenu(folder),
+                  );
+                } else {
+                  final summary = comics.firstWhere(
+                    (item) => item.comic.id == entry.entityId,
+                  );
+                  final selected = selectedIds.contains(summary.comic.id);
+                  card = _ComicCard(
+                    key: ValueKey<String>('shelf-entry-${entry.key}'),
+                    controller: controller,
+                    summary: summary,
+                    selected: selected,
+                    selectionMode: selectionMode,
+                    organizeMode: organizeMode,
+                    onTap: () => onComicTap(summary),
+                    onToggle: () => onComicToggle(summary.comic.id),
+                  );
+                }
+                if (selectionMode || !widget.dragEnabled) return card;
 
-          return _ShelfDropTarget(
-            target: entry,
-            organizeMode: organizeMode,
-            onReorder: onReorder,
-            onCreateGroup: onCreateGroup,
-            onMoveComicToFolder: onMoveComicToFolder,
-            child: LongPressDraggable<_ShelfDragData>(
-              data: _ShelfDragData(entry),
-              dragAnchorStrategy: pointerDragAnchorStrategy,
-              onDragStarted: HapticFeedback.selectionClick,
-              onDragUpdate: _updateAutoScroll,
-              onDragEnd: (_) => _stopAutoScroll(),
-              onDragCompleted: _stopAutoScroll,
-              onDraggableCanceled: (_, _) => _stopAutoScroll(),
-              feedback: _dragFeedback(context, card),
-              childWhenDragging: Opacity(opacity: 0.22, child: card),
-              child: card,
+                return _ShelfDropTarget(
+                  target: entry,
+                  organizeMode: organizeMode,
+                  groupingEnabled: widget.groupingEnabled,
+                  onReorder: onReorder,
+                  onCreateGroup: onCreateGroup,
+                  onMoveComicToFolder: onMoveComicToFolder,
+                  child: LongPressDraggable<_ShelfDragData>(
+                    data: _ShelfDragData(entry),
+                    dragAnchorStrategy: pointerDragAnchorStrategy,
+                    onDragStarted: () => _startDrag(entry),
+                    onDragUpdate: _updateAutoScroll,
+                    onDragEnd: (_) => _finishDrag(),
+                    onDragCompleted: _finishDrag,
+                    onDraggableCanceled: (_, _) => _finishDrag(),
+                    feedback: _dragFeedback(context, card),
+                    childWhenDragging: Opacity(opacity: 0.22, child: card),
+                    child: card,
+                  ),
+                );
+              },
             ),
-          );
-        },
-      ),
+          ),
+        ),
+        if (widget.activeFolderId != null &&
+            _activeDrag?.kind == ShelfEntryKind.comic)
+          Positioned(
+            top: 8,
+            left: 58,
+            right: 58,
+            child: _FolderDragOutTarget(onAccept: widget.onMoveComicToRoot),
+          ),
+      ],
     );
   }
 
@@ -1167,12 +1227,65 @@ class _LibraryGridState extends State<_LibraryGrid> {
   );
 }
 
+class _FolderDragOutTarget extends StatelessWidget {
+  const _FolderDragOutTarget({required this.onAccept});
+
+  final ValueChanged<String> onAccept;
+
+  @override
+  Widget build(BuildContext context) => DragTarget<_ShelfDragData>(
+    key: const ValueKey<String>('folder-drag-out-target'),
+    onWillAcceptWithDetails: (details) =>
+        details.data.entry.kind == ShelfEntryKind.comic,
+    onAcceptWithDetails: (details) => onAccept(details.data.entry.entityId),
+    builder: (context, candidates, rejected) => AnimatedScale(
+      scale: candidates.isEmpty ? 0.96 : 1,
+      duration: const Duration(milliseconds: 140),
+      child: Material(
+        elevation: candidates.isEmpty ? 3 : 7,
+        color: candidates.isEmpty
+            ? Theme.of(context).colorScheme.surface
+            : ShelfColors.blueSoft,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          height: 52,
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: candidates.isEmpty
+                  ? Theme.of(context).dividerColor
+                  : ShelfColors.blue,
+              width: candidates.isEmpty ? 1 : 2,
+            ),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          alignment: Alignment.center,
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(Icons.outbox_rounded, color: ShelfColors.blue),
+              SizedBox(width: 8),
+              Text(
+                '拖到这里移回主书架',
+                style: TextStyle(
+                  color: ShelfColors.blue,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 enum _ShelfDropIntent { none, reorder, createGroup, addToGroup }
 
 class _ShelfDropTarget extends StatefulWidget {
   const _ShelfDropTarget({
     required this.target,
     required this.organizeMode,
+    required this.groupingEnabled,
     required this.onReorder,
     required this.onCreateGroup,
     required this.onMoveComicToFolder,
@@ -1181,6 +1294,7 @@ class _ShelfDropTarget extends StatefulWidget {
 
   final ShelfEntry target;
   final bool organizeMode;
+  final bool groupingEnabled;
   final void Function(String fromKey, String toKey) onReorder;
   final void Function(String sourceComicId, String targetComicId) onCreateGroup;
   final void Function(String comicId, String folderId) onMoveComicToFolder;
@@ -1203,7 +1317,9 @@ class _ShelfDropTargetState extends State<_ShelfDropTarget> {
 
   _ShelfDropIntent _intentFor(DragTargetDetails<_ShelfDragData> details) {
     if (details.data.key == widget.target.key) return _ShelfDropIntent.none;
-    if (widget.organizeMode) return _ShelfDropIntent.reorder;
+    if (widget.organizeMode || !widget.groupingEnabled) {
+      return _ShelfDropIntent.reorder;
+    }
     final box = context.findRenderObject()! as RenderBox;
     final local = box.globalToLocal(details.offset);
     final size = box.size;

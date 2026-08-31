@@ -693,6 +693,11 @@ class AppController extends ChangeNotifier {
     await refresh();
   }
 
+  Future<void> reorderComicIds(List<String> orderedComicIds) async {
+    await _repository.reorderComics(orderedComicIds);
+    await refresh();
+  }
+
   Future<void> reorderShelfEntries(
     String scope,
     List<String> orderedKeys,

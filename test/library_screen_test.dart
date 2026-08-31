@@ -346,6 +346,89 @@ void main() {
         findsOneWidget,
       );
     }
+
+    final folderId = controller.folders.single.id;
+    await tester.tap(
+      find.byKey(ValueKey<String>('shelf-entry-folder:$folderId')),
+    );
+    await tester.pumpAndSettle();
+    final groupedSource = find.byKey(
+      ValueKey<String>('shelf-entry-comic:$sourceId'),
+    );
+    final groupedTarget = find.byKey(
+      ValueKey<String>('shelf-entry-comic:$targetId'),
+    );
+    final sourceRect = tester.getRect(groupedSource);
+    final reorderInsideGesture = await tester.startGesture(
+      tester.getCenter(groupedTarget),
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    await reorderInsideGesture.moveTo(
+      Offset(sourceRect.center.dx, sourceRect.bottom - 2),
+    );
+    await tester.pump(const Duration(milliseconds: 150));
+    await reorderInsideGesture.up();
+    for (var attempt = 0; attempt < 40; attempt++) {
+      final insideOrder = controller.library
+          .where((summary) => summary.comic.folderId == folderId)
+          .map((summary) => summary.comic.id)
+          .toList();
+      if (insideOrder.isNotEmpty && insideOrder.first == targetId) break;
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 25)),
+      );
+      await tester.pump();
+    }
+    expect(
+      controller.library
+          .where((summary) => summary.comic.folderId == folderId)
+          .map((summary) => summary.comic.id),
+      <String>[targetId, sourceId],
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 150)),
+    );
+    await tester.pump();
+
+    final moveOutGesture = await tester.startGesture(
+      tester.getCenter(groupedSource),
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    final moveOutTarget = find.byKey(
+      const ValueKey<String>('folder-drag-out-target'),
+    );
+    expect(moveOutTarget, findsOneWidget);
+    await moveOutGesture.moveTo(tester.getCenter(moveOutTarget));
+    await tester.pump(const Duration(milliseconds: 180));
+    await moveOutGesture.up();
+    await tester.pumpAndSettle();
+    for (var attempt = 0; attempt < 40; attempt++) {
+      final movedToRoot =
+          controller.summaryFor(sourceId)?.comic.folderId == null &&
+          controller.shelfEntries.any(
+            (entry) => entry.key == 'comic:$sourceId',
+          );
+      if (movedToRoot) break;
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 25)),
+      );
+      await tester.pump();
+    }
+    expect(controller.summaryFor(sourceId)!.comic.folderId, isNull);
+    expect(
+      controller.shelfEntries.map((entry) => entry.key),
+      contains('comic:$sourceId'),
+    );
+    await tester.tap(find.byTooltip('返回书架'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(ValueKey<String>('shelf-entry-comic:$sourceId')),
+      findsOneWidget,
+    );
+    expect(
+      controller.library.where((summary) => summary.comic.folderId == folderId),
+      hasLength(1),
+    );
   });
 
   testWidgets('拖动漫画靠近书架底边会自动向下滚动', (tester) async {
