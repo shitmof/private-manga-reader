@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
 
+import '../theme.dart';
+
 class ReaderPagePill extends StatelessWidget {
   const ReaderPagePill({
     required this.visible,
     required this.current,
     required this.total,
+    this.night = false,
     super.key,
   });
 
   final bool visible;
   final int current;
   final int total;
+  final bool night;
 
   @override
   Widget build(BuildContext context) {
@@ -36,14 +40,25 @@ class ReaderPagePill extends StatelessWidget {
                     vertical: 7,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xD9111418),
+                    color: night ? const Color(0xE6111418) : Colors.white,
                     borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: Colors.white12),
+                    border: Border.all(
+                      color: night ? Colors.white12 : ShelfColors.line,
+                    ),
+                    boxShadow: night
+                        ? const <BoxShadow>[]
+                        : const <BoxShadow>[
+                            BoxShadow(
+                              color: Color(0x14173A63),
+                              blurRadius: 14,
+                              offset: Offset(0, 4),
+                            ),
+                          ],
                   ),
                   child: Text(
                     '$current / $total',
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: night ? Colors.white : ShelfColors.blue,
                       fontWeight: FontWeight.w700,
                       fontSize: 11.5,
                       height: 1,

@@ -208,51 +208,26 @@ class _LibraryScreenState extends State<LibraryScreen>
     String sourceComicId,
     String targetComicId,
   ) async {
-    final source = controller.summaryFor(sourceComicId)?.comic;
-    final target = controller.summaryFor(targetComicId)?.comic;
+    final source = controller.summaryFor(sourceComicId);
+    final target = controller.summaryFor(targetComicId);
     if (source == null || target == null || !mounted) return;
-    var groupName = '新建书单';
-    final confirmed = await showDialog<bool>(
+    final name = await showModalBottomSheet<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('合成书单'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text('是否将《${source.title}》和《${target.title}》合成一个书单？'),
-            const SizedBox(height: 18),
-            TextFormField(
-              initialValue: groupName,
-              autofocus: true,
-              maxLength: 40,
-              onChanged: (value) => groupName = value,
-              decoration: const InputDecoration(
-                labelText: '书单名称',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('合成'),
-          ),
-        ],
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: ShelfColors.ink.withValues(alpha: 0.12),
+      builder: (sheetContext) => _ShelfGroupComposerSheet(
+        controller: controller,
+        source: source,
+        target: target,
       ),
     );
-    final name = groupName.trim();
-    if (confirmed != true || name.isEmpty || !mounted) return;
+    if (name == null || name.isEmpty || !mounted) return;
     try {
       await controller.createShelfGroupFromComics(
         sourceComicId: sourceComicId,
         targetComicId: targetComicId,
-        name: name,
+        name: name.trim(),
       );
     } catch (error) {
       if (!mounted) return;
@@ -278,21 +253,13 @@ class _LibraryScreenState extends State<LibraryScreen>
     }
     if (comic == null || folder == null || !mounted) return;
     final targetFolder = folder;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showModalBottomSheet<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('加入书单'),
-        content: Text('是否将《${comic.title}》加入《${targetFolder.name}》？'),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('加入'),
-          ),
-        ],
+      backgroundColor: Colors.transparent,
+      barrierColor: ShelfColors.ink.withValues(alpha: 0.12),
+      builder: (sheetContext) => _ShelfAddToGroupSheet(
+        comicTitle: comic.title,
+        folderName: targetFolder.name,
       ),
     );
     if (confirmed != true || !mounted) return;
@@ -328,6 +295,40 @@ class _LibraryScreenState extends State<LibraryScreen>
             _folderId == null &&
             _readingListId == null &&
             (_scope == _LibraryScope.all || _scope == _LibraryScope.private);
+        final scopeKey = _folderId != null
+            ? 'folder:$_folderId'
+            : _readingListId != null
+            ? 'reading-list:$_readingListId'
+            : 'scope:${_scope.name}';
+        final shelfContent = _isCompletelyEmpty
+            ? _EmptyLibrary(onCreate: () => _createComic(context))
+            : comics.isEmpty && visibleFolders.isEmpty
+            ? _EmptySection(scope: _scope)
+            : _LibraryGrid(
+                controller: controller,
+                entries: gridEntries,
+                comics: comics,
+                folders: visibleFolders,
+                selectedIds: _selectedIds,
+                selectionMode: _selectionMode,
+                organizeMode: _organizeMode,
+                activeFolderId: _folderId,
+                dragEnabled: _readingListId == null,
+                groupingEnabled:
+                    _folderId == null &&
+                    _readingListId == null &&
+                    (_scope == _LibraryScope.all ||
+                        _scope == _LibraryScope.private),
+                onComicTap: _openComic,
+                onComicToggle: _toggleComic,
+                onMoveComicToFolder: _confirmAddComicToShelfGroup,
+                onFolderTap: (folder) => setState(() => _folderId = folder.id),
+                onFolderMenu: _showFolderMenu,
+                onReorder: _reorderShelf,
+                onCreateGroup: _confirmCreateShelfGroup,
+                onMoveComicToRoot: (comicId) =>
+                    controller.moveComicsToFolder(<String>[comicId], null),
+              );
         return PopScope<void>(
           canPop: !_hasInternalBackTarget,
           onPopInvokedWithResult: (didPop, _) {
@@ -416,36 +417,31 @@ class _LibraryScreenState extends State<LibraryScreen>
                 if (_folderId == null && _readingListId == null)
                   _buildScopeBar(),
                 Expanded(
-                  child: _isCompletelyEmpty
-                      ? _EmptyLibrary(onCreate: () => _createComic(context))
-                      : comics.isEmpty && visibleFolders.isEmpty
-                      ? _EmptySection(scope: _scope)
-                      : _LibraryGrid(
-                          controller: controller,
-                          entries: gridEntries,
-                          comics: comics,
-                          folders: visibleFolders,
-                          selectedIds: _selectedIds,
-                          selectionMode: _selectionMode,
-                          organizeMode: _organizeMode,
-                          activeFolderId: _folderId,
-                          dragEnabled: _readingListId == null,
-                          groupingEnabled:
-                              _folderId == null &&
-                              _readingListId == null &&
-                              (_scope == _LibraryScope.all ||
-                                  _scope == _LibraryScope.private),
-                          onComicTap: _openComic,
-                          onComicToggle: _toggleComic,
-                          onMoveComicToFolder: _confirmAddComicToShelfGroup,
-                          onFolderTap: (folder) =>
-                              setState(() => _folderId = folder.id),
-                          onFolderMenu: _showFolderMenu,
-                          onReorder: _reorderShelf,
-                          onCreateGroup: _confirmCreateShelfGroup,
-                          onMoveComicToRoot: (comicId) => controller
-                              .moveComicsToFolder(<String>[comicId], null),
-                        ),
+                  child: AnimatedSwitcher(
+                    key: const ValueKey<String>('library-scope-switcher'),
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? const Duration(milliseconds: 80)
+                        : const Duration(milliseconds: 280),
+                    reverseDuration: MediaQuery.disableAnimationsOf(context)
+                        ? const Duration(milliseconds: 80)
+                        : const Duration(milliseconds: 220),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    transitionBuilder: (child, animation) => FadeTransition(
+                      opacity: animation,
+                      child: ScaleTransition(
+                        scale: Tween<double>(
+                          begin: 0.985,
+                          end: 1,
+                        ).animate(animation),
+                        child: child,
+                      ),
+                    ),
+                    child: KeyedSubtree(
+                      key: ValueKey<String>(scopeKey),
+                      child: shelfContent,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -996,6 +992,219 @@ class _ShelfDragData {
   String get key => entry.key;
 }
 
+class _ShelfGroupComposerSheet extends StatefulWidget {
+  const _ShelfGroupComposerSheet({
+    required this.controller,
+    required this.source,
+    required this.target,
+  });
+
+  final AppController controller;
+  final ComicSummary source;
+  final ComicSummary target;
+
+  @override
+  State<_ShelfGroupComposerSheet> createState() =>
+      _ShelfGroupComposerSheetState();
+}
+
+class _ShelfGroupComposerSheetState extends State<_ShelfGroupComposerSheet> {
+  late final TextEditingController _nameController = TextEditingController(
+    text: '新建书单',
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _nameController.text.length,
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) return;
+    Navigator.pop(context, name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    return AnimatedPadding(
+      duration: Duration(milliseconds: reduceMotion ? 80 : 220),
+      curve: Curves.easeOutCubic,
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: Material(
+        key: const ValueKey<String>('shelf-group-composer-sheet'),
+        color: Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        clipBehavior: Clip.antiAlias,
+        child: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: ShelfColors.line,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text('合成书单', style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 6),
+                Text(
+                  '是否将《${widget.source.comic.title}》和《${widget.target.comic.title}》合成一个书单？',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: ShelfColors.muted),
+                ),
+                const SizedBox(height: 18),
+                SizedBox(
+                  key: const ValueKey<String>('shelf-group-composer-preview'),
+                  width: 132,
+                  child: AspectRatio(
+                    aspectRatio: 0.72,
+                    child: _FolderMosaic(
+                      controller: widget.controller,
+                      contents: <ComicSummary>[widget.source, widget.target],
+                      padding: 8,
+                      radius: 16,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                TextField(
+                  controller: _nameController,
+                  autofocus: true,
+                  maxLength: 40,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => _submit(),
+                  decoration: const InputDecoration(labelText: '书单名称'),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('取消'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: _submit,
+                        child: const Text('合成书单'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ShelfAddToGroupSheet extends StatelessWidget {
+  const _ShelfAddToGroupSheet({
+    required this.comicTitle,
+    required this.folderName,
+  });
+
+  final String comicTitle;
+  final String folderName;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    key: const ValueKey<String>('shelf-add-to-group-sheet'),
+    color: Colors.white,
+    borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+    clipBehavior: Clip.antiAlias,
+    child: SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(
+              width: 38,
+              height: 4,
+              decoration: BoxDecoration(
+                color: ShelfColors.line,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text('加入书单', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            Container(
+              width: 76,
+              height: 76,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: ShelfColors.line),
+                boxShadow: const <BoxShadow>[
+                  BoxShadow(
+                    color: Color(0x14173A63),
+                    blurRadius: 14,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.auto_awesome_mosaic_outlined,
+                color: ShelfColors.blue,
+                size: 30,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              '是否将《$comicTitle》加入《$folderName》？',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: ShelfColors.muted),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('取消'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('加入'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class _LibraryGrid extends StatefulWidget {
   const _LibraryGrid({
     required this.controller,
@@ -1131,73 +1340,106 @@ class _LibraryGridState extends State<_LibraryGrid> {
             interactive: true,
             thickness: 5,
             radius: const Radius.circular(3),
-            child: GridView.builder(
-              key: const ValueKey<String>('library-three-column-grid'),
-              controller: _scrollController,
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 104),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 9,
-                mainAxisSpacing: 18,
-                childAspectRatio: 0.57,
-              ),
-              itemCount: entries.length,
-              itemBuilder: (context, index) {
-                final entry = entries[index];
-                final Widget card;
-                if (entry.kind == ShelfEntryKind.folder) {
-                  final folder = folders.firstWhere(
-                    (item) => item.id == entry.entityId,
-                  );
-                  final contents = controller.library
-                      .where((summary) => summary.comic.folderId == folder.id)
-                      .toList();
-                  card = _FolderCard(
-                    key: ValueKey<String>('shelf-entry-${entry.key}'),
-                    controller: controller,
-                    folder: folder,
-                    contents: contents,
-                    organizeMode: organizeMode,
-                    onTap: () => onFolderTap(folder),
-                    onMenu: () => onFolderMenu(folder),
-                  );
-                } else {
-                  final summary = comics.firstWhere(
-                    (item) => item.comic.id == entry.entityId,
-                  );
-                  final selected = selectedIds.contains(summary.comic.id);
-                  card = _ComicCard(
-                    key: ValueKey<String>('shelf-entry-${entry.key}'),
-                    controller: controller,
-                    summary: summary,
-                    selected: selected,
-                    selectionMode: selectionMode,
-                    organizeMode: organizeMode,
-                    onTap: () => onComicTap(summary),
-                    onToggle: () => onComicToggle(summary.comic.id),
-                  );
-                }
-                if (selectionMode || !widget.dragEnabled) return card;
-
-                return _ShelfDropTarget(
-                  target: entry,
-                  organizeMode: organizeMode,
-                  groupingEnabled: widget.groupingEnabled,
-                  onReorder: onReorder,
-                  onCreateGroup: onCreateGroup,
-                  onMoveComicToFolder: onMoveComicToFolder,
-                  child: LongPressDraggable<_ShelfDragData>(
-                    data: _ShelfDragData(entry),
-                    dragAnchorStrategy: pointerDragAnchorStrategy,
-                    onDragStarted: () => _startDrag(entry),
-                    onDragUpdate: _updateAutoScroll,
-                    onDragEnd: (_) => _finishDrag(),
-                    onDragCompleted: _finishDrag,
-                    onDraggableCanceled: (_, _) => _finishDrag(),
-                    feedback: _dragFeedback(context, card),
-                    childWhenDragging: Opacity(opacity: 0.22, child: card),
-                    child: card,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 340;
+                final horizontalPadding = compact ? 12.0 : 16.0;
+                final crossSpacing = compact ? 10.0 : 14.0;
+                final crossAxisCount = constraints.maxWidth >= 600
+                    ? ((constraints.maxWidth -
+                                  horizontalPadding * 2 +
+                                  crossSpacing) /
+                              (118 + crossSpacing))
+                          .floor()
+                          .clamp(4, 5)
+                    : 3;
+                final cardWidth =
+                    (constraints.maxWidth -
+                        horizontalPadding * 2 -
+                        crossSpacing * (crossAxisCount - 1)) /
+                    crossAxisCount;
+                final cardExtent = cardWidth / 0.72 + 69;
+                return GridView.builder(
+                  key: const ValueKey<String>('library-three-column-grid'),
+                  controller: _scrollController,
+                  padding: EdgeInsets.fromLTRB(
+                    horizontalPadding,
+                    12,
+                    horizontalPadding,
+                    104,
                   ),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: crossAxisCount,
+                    crossAxisSpacing: crossSpacing,
+                    mainAxisSpacing: 24,
+                    mainAxisExtent: cardExtent,
+                  ),
+                  itemCount: entries.length,
+                  itemBuilder: (context, index) {
+                    final entry = entries[index];
+                    final Widget card;
+                    if (entry.kind == ShelfEntryKind.folder) {
+                      final folder = folders.firstWhere(
+                        (item) => item.id == entry.entityId,
+                      );
+                      final contents = controller.library
+                          .where(
+                            (summary) => summary.comic.folderId == folder.id,
+                          )
+                          .toList();
+                      card = _FolderCard(
+                        key: ValueKey<String>('shelf-entry-${entry.key}'),
+                        controller: controller,
+                        folder: folder,
+                        contents: contents,
+                        organizeMode: organizeMode,
+                        onTap: () => onFolderTap(folder),
+                        onMenu: () => onFolderMenu(folder),
+                      );
+                    } else {
+                      final summary = comics.firstWhere(
+                        (item) => item.comic.id == entry.entityId,
+                      );
+                      final selected = selectedIds.contains(summary.comic.id);
+                      card = _ComicCard(
+                        key: ValueKey<String>('shelf-entry-${entry.key}'),
+                        controller: controller,
+                        summary: summary,
+                        selected: selected,
+                        selectionMode: selectionMode,
+                        organizeMode: organizeMode,
+                        onTap: () => onComicTap(summary),
+                        onToggle: () => onComicToggle(summary.comic.id),
+                      );
+                    }
+                    if (selectionMode || !widget.dragEnabled) return card;
+
+                    return _ShelfDropTarget(
+                      target: entry,
+                      organizeMode: organizeMode,
+                      groupingEnabled: widget.groupingEnabled,
+                      onReorder: onReorder,
+                      onCreateGroup: onCreateGroup,
+                      onMoveComicToFolder: onMoveComicToFolder,
+                      child: LongPressDraggable<_ShelfDragData>(
+                        data: _ShelfDragData(entry),
+                        dragAnchorStrategy: pointerDragAnchorStrategy,
+                        onDragStarted: () => _startDrag(entry),
+                        onDragUpdate: _updateAutoScroll,
+                        onDragEnd: (_) => _finishDrag(),
+                        onDragCompleted: _finishDrag,
+                        onDraggableCanceled: (_, _) => _finishDrag(),
+                        feedback: _dragFeedback(
+                          context,
+                          card,
+                          width: cardWidth,
+                          height: cardExtent,
+                        ),
+                        childWhenDragging: Opacity(opacity: 0.22, child: card),
+                        child: card,
+                      ),
+                    );
+                  },
                 );
               },
             ),
@@ -1215,14 +1457,31 @@ class _LibraryGridState extends State<_LibraryGrid> {
     );
   }
 
-  Widget _dragFeedback(BuildContext context, Widget card) => SizedBox(
-    width: 112,
-    height: 196,
-    child: Material(
-      elevation: 8,
-      borderRadius: BorderRadius.circular(14),
-      color: Theme.of(context).colorScheme.surface,
-      child: card,
+  Widget _dragFeedback(
+    BuildContext context,
+    Widget card, {
+    required double width,
+    required double height,
+  }) => SizedBox(
+    key: const ValueKey<String>('shelf-drag-feedback'),
+    width: width,
+    height: height,
+    child: TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0.96, end: 1.035),
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOutCubic,
+      builder: (context, scale, child) => Transform.scale(
+        scale: scale,
+        alignment: Alignment.topCenter,
+        child: child,
+      ),
+      child: Material(
+        elevation: 10,
+        shadowColor: const Color(0x24173A63),
+        borderRadius: BorderRadius.circular(14),
+        color: Theme.of(context).colorScheme.surface,
+        child: card,
+      ),
     ),
   );
 }
@@ -1399,12 +1658,16 @@ class _ShelfDropTargetState extends State<_ShelfDropTarget> {
       onLeave: (_) => _reset(),
       onAcceptWithDetails: _accept,
       builder: (context, candidates, _) => AnimatedScale(
+        key: ValueKey<String>('shelf-drop-scale-${widget.target.key}'),
         scale: candidates.isEmpty
             ? 1
             : grouping
-            ? 0.92
-            : 0.97,
-        duration: const Duration(milliseconds: 140),
+            ? (_armed ? 1.025 : 1.015)
+            : 1,
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? const Duration(milliseconds: 80)
+            : const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
         child: Stack(
           fit: StackFit.expand,
           children: <Widget>[
@@ -1426,8 +1689,8 @@ class _ShelfDropTargetState extends State<_ShelfDropTarget> {
                   alignment: Alignment.center,
                   child: Icon(
                     _armed
-                        ? Icons.create_new_folder_rounded
-                        : Icons.folder_copy_outlined,
+                        ? Icons.grid_view_rounded
+                        : Icons.dashboard_customize_outlined,
                     color: ShelfColors.blue,
                     size: 32,
                   ),
@@ -1463,43 +1726,66 @@ class _FolderCard extends StatelessWidget {
     final previews = contents.take(4).toList();
     return InkWell(
       onTap: organizeMode ? null : onTap,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Expanded(
+          AspectRatio(
+            aspectRatio: 0.72,
             child: _FolderMosaic(controller: controller, contents: previews),
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  folder.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 36,
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: Text(
+                folder.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(height: 1.3),
               ),
-              if (folder.isPrivate)
-                const Padding(
-                  padding: EdgeInsets.only(right: 3),
-                  child: Icon(Icons.lock_rounded, size: 14),
-                ),
-              if (!organizeMode)
-                InkWell(
-                  onTap: onMenu,
-                  child: const Icon(Icons.more_horiz_rounded, size: 18),
-                )
-              else
-                const Icon(Icons.drag_indicator_rounded, size: 18),
-            ],
+            ),
           ),
-          Text(
-            '${contents.length} 本',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: ShelfColors.muted),
+          const SizedBox(height: 5),
+          SizedBox(
+            height: 18,
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    contents.isEmpty ? '空书单' : '共 ${contents.length} 本',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: ShelfColors.muted,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ),
+                if (folder.isPrivate)
+                  const Padding(
+                    padding: EdgeInsets.only(right: 3),
+                    child: Icon(Icons.lock_rounded, size: 14),
+                  ),
+                if (!organizeMode)
+                  InkWell(
+                    onTap: onMenu,
+                    borderRadius: BorderRadius.circular(10),
+                    child: const SizedBox(
+                      width: 24,
+                      child: Icon(Icons.more_vert_rounded, size: 18),
+                    ),
+                  )
+                else
+                  const SizedBox(
+                    width: 24,
+                    child: Icon(Icons.drag_indicator_rounded, size: 18),
+                  ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1511,8 +1797,8 @@ class _FolderMosaic extends StatelessWidget {
   const _FolderMosaic({
     required this.controller,
     required this.contents,
-    this.padding = 7,
-    this.radius = 14,
+    this.padding = 8,
+    this.radius = 16,
   });
 
   final AppController controller;
@@ -1524,39 +1810,36 @@ class _FolderMosaic extends StatelessWidget {
   Widget build(BuildContext context) {
     final previews = contents.take(4).toList(growable: false);
     return Container(
+      key: const ValueKey<String>('folder-mosaic-surface'),
       padding: EdgeInsets.all(padding),
       decoration: BoxDecoration(
-        color: ShelfColors.blueSoft,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(radius),
         border: Border.all(color: ShelfColors.line),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: Color(0x14173A63),
+            blurRadius: 14,
+            offset: Offset(0, 4),
+          ),
+        ],
       ),
       child: GridView.builder(
         physics: const NeverScrollableScrollPhysics(),
         padding: EdgeInsets.zero,
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 2,
-          crossAxisSpacing: 3,
-          mainAxisSpacing: 3,
+          crossAxisSpacing: 4,
+          mainAxisSpacing: 4,
         ),
         itemCount: 4,
         itemBuilder: (_, index) {
           final preview = index < previews.length ? previews[index] : null;
           return ClipRRect(
             key: ValueKey<String>('folder-mosaic-slot-$index'),
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(5),
             child: preview == null
-                ? ColoredBox(
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.surface.withValues(alpha: 0.72),
-                    child: index == 0 && previews.isEmpty
-                        ? const Icon(
-                            Icons.folder_outlined,
-                            size: 18,
-                            color: ShelfColors.blue,
-                          )
-                        : null,
-                  )
+                ? const ColoredBox(color: ShelfColors.blueSoft)
                 : preview.coverStoredPath == null
                 ? ColoredBox(
                     color: Theme.of(context).colorScheme.surface,
@@ -1608,7 +1891,8 @@ class _ComicCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Expanded(
+          AspectRatio(
+            aspectRatio: 0.72,
             child: Stack(
               fit: StackFit.expand,
               children: <Widget>[
@@ -1672,21 +1956,32 @@ class _ComicCard extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            comic.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleSmall,
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 36,
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: Text(
+                comic.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(height: 1.3),
+              ),
+            ),
           ),
-          const SizedBox(height: 2),
-          Text(
-            '${summary.itemCount} 张 · ${formatBytes(summary.totalBytes)}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: ShelfColors.muted,
-              fontSize: 10.5,
+          const SizedBox(height: 5),
+          SizedBox(
+            height: 18,
+            child: Text(
+              '${summary.itemCount} 张 · ${formatBytes(summary.totalBytes)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: ShelfColors.muted,
+                fontSize: 11.5,
+              ),
             ),
           ),
         ],

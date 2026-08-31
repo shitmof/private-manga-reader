@@ -968,6 +968,8 @@ class LibraryRepository {
       for (final row in rows) row['key']! as String: row['value']! as String,
     };
     final themeName = values['theme'] ?? AppThemePreference.system.name;
+    final surfaceModeName =
+        values['reader_surface_mode'] ?? ReaderSurfaceMode.paper.name;
     return ReaderPreferences(
       imageGap: double.tryParse(values['image_gap'] ?? '') ?? 0,
       showPageNumber: values['show_page_number'] != 'false',
@@ -981,6 +983,10 @@ class LibraryRepository {
         (value) => value.name == themeName,
         orElse: () => AppThemePreference.system,
       ),
+      surfaceMode: ReaderSurfaceMode.values.firstWhere(
+        (value) => value.name == surfaceModeName,
+        orElse: () => ReaderSurfaceMode.paper,
+      ),
     );
   }
 
@@ -992,6 +998,7 @@ class LibraryRepository {
       'remember_progress': preferences.rememberProgress.toString(),
       'reader_brightness': preferences.readerBrightness.toString(),
       'theme': preferences.theme.name,
+      'reader_surface_mode': preferences.surfaceMode.name,
     };
     await db.transaction((txn) async {
       for (final entry in values.entries) {

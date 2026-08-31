@@ -5,6 +5,7 @@ import '../theme.dart';
 import '../widgets/formatters.dart';
 import '../widgets/import_flow.dart';
 import '../widgets/private_image.dart';
+import '../widgets/shelf_page_route.dart';
 import 'editor_screen.dart';
 import 'reader_screen.dart';
 
@@ -105,7 +106,7 @@ class ComicDetailScreen extends StatelessWidget {
               if (summary.itemCount > 0) ...<Widget>[
                 FilledButton.icon(
                   onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
+                    buildShelfReaderRoute<void>(
                       builder: (_) => ReaderScreen(
                         controller: controller,
                         comicId: comicId,

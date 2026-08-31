@@ -11,7 +11,7 @@ class AppDatabase {
   final DatabaseFactory _factory;
   final String? overridePath;
   Database? _database;
-  static const schemaVersion = 7;
+  static const schemaVersion = 8;
 
   Future<Database> get instance async {
     final existing = _database;
@@ -162,6 +162,10 @@ class AppDatabase {
       await db.update('settings', <String, Object?>{
         'value': '0.0',
       }, where: "key = 'image_gap' AND value IN ('10', '10.0')");
+    }
+    if (oldVersion < 8) {
+      // V1.5 的白蓝阅读画布使用缺省偏好即可生效。设置表为键值结构，
+      // 此处只推进 schema 版本并触发 pre-v8 安全快照，不改写其他数据。
     }
   }
 

@@ -8,8 +8,10 @@ import 'package:flutter/rendering.dart';
 import '../models/entities.dart';
 import '../services/page_offset_index.dart';
 import '../state/app_controller.dart';
+import '../theme.dart';
 import '../widgets/reader_edge_scrubber.dart';
 import '../widgets/reader_page_pill.dart';
+import '../widgets/reader_top_bar.dart';
 
 class RemoteReaderScreen extends StatefulWidget {
   const RemoteReaderScreen({
@@ -79,18 +81,24 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
   Widget build(BuildContext context) {
     final book = widget.controller.remoteBookFor(widget.bookId);
     final gap = widget.controller.preferences.imageGap;
+    final night =
+        widget.controller.preferences.surfaceMode == ReaderSurfaceMode.night;
+    final canvasColor = night ? const Color(0xFF0B0D10) : ShelfColors.paper;
     final width = MediaQuery.sizeOf(context).width;
     _ensureOffsetIndex(width, gap);
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0D10),
+      key: const ValueKey<String>('remote-reader-canvas'),
+      backgroundColor: canvasColor,
       body: GestureDetector(
         behavior: HitTestBehavior.translucent,
         onTap: () => setState(() => _controlsVisible = !_controlsVisible),
         child: Stack(
           children: <Widget>[
             if (_loading)
-              const Center(
-                child: CircularProgressIndicator(color: Colors.white),
+              Center(
+                child: CircularProgressIndicator(
+                  color: night ? Colors.white : ShelfColors.blue,
+                ),
               )
             else
               ListView.builder(
@@ -109,15 +117,19 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
                       child: SizedBox(
                         width: width,
                         height: _displayHeight(page, width),
-                        child: _pageImage(page, width),
+                        child: ColoredBox(
+                          color: night ? const Color(0xFF0B0D10) : Colors.white,
+                          child: _pageImage(page, width, night: night),
+                        ),
                       ),
                     ),
                   );
                 },
               ),
-            _RemoteReaderTopBar(
+            ReaderTopBar(
               visible: _controlsVisible,
               title: book?.title ?? '网络漫画',
+              night: night,
               onBack: () => Navigator.of(context).pop(),
               onRestart: () => _scrollController.animateTo(
                 0,
@@ -127,6 +139,7 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
             ),
             if (_pages.length > 1)
               ReaderEdgeScrubber(
+                night: night,
                 currentFraction: _scrubbing
                     ? _scrubFraction
                     : _offsetIndex.fractionForPage(_currentIndex),
@@ -146,6 +159,7 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
                 },
               ),
             ReaderPagePill(
+              night: night,
               visible:
                   _controlsVisible &&
                   widget.controller.preferences.showPageNumber,
@@ -220,21 +234,28 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
   }
 
   Future<void> _showZoom(RemotePage page) async {
+    final night =
+        widget.controller.preferences.surfaceMode == ReaderSurfaceMode.night;
+    final background = night ? Colors.black : ShelfColors.paper;
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
         opaque: true,
         pageBuilder: (context, animation, secondaryAnimation) => Scaffold(
-          backgroundColor: Colors.black,
+          backgroundColor: background,
           appBar: AppBar(
-            backgroundColor: Colors.black,
-            foregroundColor: Colors.white,
+            backgroundColor: night ? Colors.black : Colors.white,
+            foregroundColor: night ? Colors.white : ShelfColors.blue,
             title: Text('${_currentIndex + 1} / ${_pages.length}'),
           ),
           body: InteractiveViewer(
             minScale: 0.8,
             maxScale: 5,
             child: Center(
-              child: _pageImage(page, MediaQuery.sizeOf(context).width),
+              child: _pageImage(
+                page,
+                MediaQuery.sizeOf(context).width,
+                night: night,
+              ),
             ),
           ),
         ),
@@ -242,7 +263,7 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
     );
   }
 
-  Widget _pageImage(RemotePage page, double width) {
+  Widget _pageImage(RemotePage page, double width, {required bool night}) {
     final cacheWidth = (width * MediaQuery.devicePixelRatioOf(context))
         .round()
         .clamp(360, 2400);
@@ -253,24 +274,24 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
         alignment: Alignment.topCenter,
         cacheWidth: cacheWidth,
         filterQuality: FilterQuality.medium,
-        errorBuilder: _imageError,
+        errorBuilder: (context, error, stack) => _imageError(night),
       );
     }
     return _ExternalPageImage(
       controller: widget.controller,
       page: page,
       cacheWidth: cacheWidth,
+      night: night,
     );
   }
 
-  Widget _imageError(BuildContext context, Object? error, StackTrace? stack) =>
-      const Center(
-        child: Icon(
-          Icons.broken_image_outlined,
-          size: 42,
-          color: Colors.white54,
-        ),
-      );
+  Widget _imageError(bool night) => Center(
+    child: Icon(
+      Icons.broken_image_outlined,
+      size: 42,
+      color: night ? Colors.white54 : ShelfColors.muted,
+    ),
+  );
 }
 
 class _ExternalPageImage extends StatefulWidget {
@@ -278,11 +299,13 @@ class _ExternalPageImage extends StatefulWidget {
     required this.controller,
     required this.page,
     required this.cacheWidth,
+    required this.night,
   });
 
   final AppController controller;
   final RemotePage page;
   final int cacheWidth;
+  final bool night;
 
   @override
   State<_ExternalPageImage> createState() => _ExternalPageImageState();
@@ -306,18 +329,20 @@ class _ExternalPageImageState extends State<_ExternalPageImage> {
     future: _load,
     builder: (context, snapshot) {
       if (snapshot.hasError) {
-        return const Center(
+        return Center(
           child: Icon(
             Icons.broken_image_outlined,
             size: 42,
-            color: Colors.white54,
+            color: widget.night ? Colors.white54 : ShelfColors.muted,
           ),
         );
       }
       final bytes = snapshot.data;
       if (bytes == null) {
-        return const Center(
-          child: CircularProgressIndicator(color: Colors.white54),
+        return Center(
+          child: CircularProgressIndicator(
+            color: widget.night ? Colors.white54 : ShelfColors.blue,
+          ),
         );
       }
       return Image.memory(
@@ -326,88 +351,14 @@ class _ExternalPageImageState extends State<_ExternalPageImage> {
         alignment: Alignment.topCenter,
         cacheWidth: widget.cacheWidth,
         filterQuality: FilterQuality.medium,
-        errorBuilder: (context, error, stackTrace) => const Center(
+        errorBuilder: (context, error, stackTrace) => Center(
           child: Icon(
             Icons.broken_image_outlined,
             size: 42,
-            color: Colors.white54,
+            color: widget.night ? Colors.white54 : ShelfColors.muted,
           ),
         ),
       );
     },
   );
-}
-
-class _RemoteReaderTopBar extends StatelessWidget {
-  const _RemoteReaderTopBar({
-    required this.visible,
-    required this.title,
-    required this.onBack,
-    required this.onRestart,
-  });
-
-  final bool visible;
-  final String title;
-  final VoidCallback onBack;
-  final VoidCallback onRestart;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedSlide(
-      offset: visible ? Offset.zero : const Offset(0, -1),
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOut,
-      child: AnimatedOpacity(
-        opacity: visible ? 1 : 0,
-        duration: const Duration(milliseconds: 160),
-        child: IgnorePointer(
-          ignoring: !visible,
-          child: Container(
-            color: const Color(0xE6111418),
-            child: SafeArea(
-              bottom: false,
-              child: SizedBox(
-                height: 56,
-                child: Row(
-                  children: <Widget>[
-                    IconButton(
-                      onPressed: onBack,
-                      color: Colors.white,
-                      icon: const Icon(Icons.arrow_back_ios_new_rounded),
-                    ),
-                    Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    PopupMenuButton<String>(
-                      color: const Color(0xFF20242A),
-                      iconColor: Colors.white,
-                      onSelected: (_) => onRestart(),
-                      itemBuilder: (context) => const <PopupMenuEntry<String>>[
-                        PopupMenuItem(
-                          value: 'restart',
-                          child: Text(
-                            '从头开始',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }

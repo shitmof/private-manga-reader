@@ -9,8 +9,10 @@ import '../models/entities.dart';
 import '../services/page_offset_index.dart';
 import '../services/privacy_service.dart';
 import '../state/app_controller.dart';
+import '../theme.dart';
 import '../widgets/reader_edge_scrubber.dart';
 import '../widgets/reader_page_pill.dart';
+import '../widgets/reader_top_bar.dart';
 
 class ReaderScreen extends StatefulWidget {
   const ReaderScreen({
@@ -88,18 +90,24 @@ class _ReaderScreenState extends State<ReaderScreen>
     final summary = widget.controller.summaryFor(widget.comicId);
     final title = summary?.comic.title ?? '阅读';
     final gap = widget.controller.preferences.imageGap;
+    final night =
+        widget.controller.preferences.surfaceMode == ReaderSurfaceMode.night;
+    final canvasColor = night ? const Color(0xFF0B0D10) : ShelfColors.paper;
     final width = MediaQuery.sizeOf(context).width;
     _ensureOffsetIndex(width, gap);
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0D10),
+      key: const ValueKey<String>('reader-canvas'),
+      backgroundColor: canvasColor,
       body: GestureDetector(
         behavior: HitTestBehavior.translucent,
         onTap: () => setState(() => _controlsVisible = !_controlsVisible),
         child: Stack(
           children: <Widget>[
             if (_loading)
-              const Center(
-                child: CircularProgressIndicator(color: Colors.white),
+              Center(
+                child: CircularProgressIndicator(
+                  color: night ? Colors.white : ShelfColors.blue,
+                ),
               )
             else
               ListView.builder(
@@ -119,34 +127,40 @@ class _ReaderScreenState extends State<ReaderScreen>
                       child: SizedBox(
                         width: width,
                         height: height,
-                        child: Image.file(
-                          File(
-                            widget.controller.filePath(item.asset.storedPath),
-                          ),
-                          fit: BoxFit.contain,
-                          alignment: Alignment.topCenter,
-                          cacheWidth:
-                              (width * MediaQuery.devicePixelRatioOf(context))
-                                  .round()
-                                  .clamp(360, 2400),
-                          filterQuality: FilterQuality.medium,
-                          errorBuilder: (context, error, stackTrace) =>
-                              const Center(
-                                child: Icon(
-                                  Icons.broken_image_outlined,
-                                  size: 42,
-                                  color: Colors.white54,
+                        child: ColoredBox(
+                          color: night ? const Color(0xFF0B0D10) : Colors.white,
+                          child: Image.file(
+                            File(
+                              widget.controller.filePath(item.asset.storedPath),
+                            ),
+                            fit: BoxFit.contain,
+                            alignment: Alignment.topCenter,
+                            cacheWidth:
+                                (width * MediaQuery.devicePixelRatioOf(context))
+                                    .round()
+                                    .clamp(360, 2400),
+                            filterQuality: FilterQuality.medium,
+                            errorBuilder: (context, error, stackTrace) =>
+                                Center(
+                                  child: Icon(
+                                    Icons.broken_image_outlined,
+                                    size: 42,
+                                    color: night
+                                        ? Colors.white54
+                                        : ShelfColors.muted,
+                                  ),
                                 ),
-                              ),
+                          ),
                         ),
                       ),
                     ),
                   );
                 },
               ),
-            _ReaderTopBar(
+            ReaderTopBar(
               visible: _controlsVisible,
               title: title,
+              night: night,
               onBack: () async {
                 await _saveProgress();
                 if (context.mounted) Navigator.pop(context);
@@ -161,6 +175,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             ),
             if (!_loading && _items.length > 1)
               ReaderEdgeScrubber(
+                night: night,
                 currentFraction: _scrubbing
                     ? _scrubFraction
                     : _offsetIndex.fractionForPage(_currentIndex),
@@ -182,6 +197,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                 },
               ),
             ReaderPagePill(
+              night: night,
               visible:
                   _controlsVisible &&
                   widget.controller.preferences.showPageNumber,
@@ -268,92 +284,120 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   Future<void> _showReaderSettings() async {
     var brightness = widget.controller.preferences.readerBrightness;
+    var surfaceMode = widget.controller.preferences.surfaceMode;
     final bookmarks = await widget.controller.loadBookmarks(widget.comicId);
     if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      backgroundColor: const Color(0xFF20242A),
+      backgroundColor: surfaceMode == ReaderSurfaceMode.night
+          ? const Color(0xFF20242A)
+          : Colors.white,
       builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                const Text(
-                  '阅读设置',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
+        builder: (context, setSheetState) {
+          final night = surfaceMode == ReaderSurfaceMode.night;
+          final foreground = night ? Colors.white : ShelfColors.ink;
+          final secondary = night ? Colors.white54 : ShelfColors.muted;
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  const Text(
+                    '阅读设置',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                   ),
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: <Widget>[
-                    const Icon(Icons.brightness_low, color: Colors.white70),
-                    Expanded(
-                      child: Slider(
-                        value: brightness,
-                        min: 0.05,
-                        max: 1,
-                        onChanged: (value) {
-                          brightness = value;
-                          setSheetState(() {});
-                          _applyBrightness(value);
-                        },
-                        onChangeEnd: (value) =>
-                            widget.controller.updatePreferences(
-                              widget.controller.preferences.copyWith(
-                                readerBrightness: value,
+                  const SizedBox(height: 14),
+                  SegmentedButton<ReaderSurfaceMode>(
+                    showSelectedIcon: false,
+                    segments: const <ButtonSegment<ReaderSurfaceMode>>[
+                      ButtonSegment(
+                        value: ReaderSurfaceMode.paper,
+                        icon: Icon(Icons.light_mode_outlined),
+                        label: Text('画纸'),
+                      ),
+                      ButtonSegment(
+                        value: ReaderSurfaceMode.night,
+                        icon: Icon(Icons.dark_mode_outlined),
+                        label: Text('夜间'),
+                      ),
+                    ],
+                    selected: <ReaderSurfaceMode>{surfaceMode},
+                    onSelectionChanged: (selection) {
+                      surfaceMode = selection.first;
+                      setSheetState(() {});
+                      widget.controller.updatePreferences(
+                        widget.controller.preferences.copyWith(
+                          surfaceMode: surfaceMode,
+                        ),
+                      );
+                      if (mounted) setState(() {});
+                    },
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: <Widget>[
+                      Icon(Icons.brightness_low, color: secondary),
+                      Expanded(
+                        child: Slider(
+                          value: brightness,
+                          min: 0.05,
+                          max: 1,
+                          onChanged: (value) {
+                            brightness = value;
+                            setSheetState(() {});
+                            _applyBrightness(value);
+                          },
+                          onChangeEnd: (value) =>
+                              widget.controller.updatePreferences(
+                                widget.controller.preferences.copyWith(
+                                  readerBrightness: value,
+                                ),
                               ),
-                            ),
+                        ),
+                      ),
+                      Icon(Icons.brightness_high, color: secondary),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.bookmarks_outlined, color: foreground),
+                    title: Text(
+                      '页面书签（${bookmarks.length}）',
+                      style: TextStyle(color: foreground),
+                    ),
+                    subtitle: Text(
+                      '点击书签可快速返回对应页',
+                      style: TextStyle(color: secondary),
+                    ),
+                  ),
+                  if (bookmarks.isNotEmpty)
+                    SizedBox(
+                      height: 56,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: bookmarks.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 8),
+                        itemBuilder: (context, index) {
+                          final bookmark = bookmarks[index];
+                          return ActionChip(
+                            label: Text('第 ${bookmark.position + 1} 页'),
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _jumpToPage(bookmark.position);
+                            },
+                          );
+                        },
                       ),
                     ),
-                    const Icon(Icons.brightness_high, color: Colors.white70),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(
-                    Icons.bookmarks_outlined,
-                    color: Colors.white,
-                  ),
-                  title: Text(
-                    '页面书签（${bookmarks.length}）',
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                  subtitle: const Text(
-                    '点击书签可快速返回对应页',
-                    style: TextStyle(color: Colors.white54),
-                  ),
-                ),
-                if (bookmarks.isNotEmpty)
-                  SizedBox(
-                    height: 56,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: bookmarks.length,
-                      separatorBuilder: (_, _) => const SizedBox(width: 8),
-                      itemBuilder: (context, index) {
-                        final bookmark = bookmarks[index];
-                        return ActionChip(
-                          label: Text('第 ${bookmark.position + 1} 页'),
-                          onPressed: () {
-                            Navigator.pop(context);
-                            _jumpToPage(bookmark.position);
-                          },
-                        );
-                      },
-                    ),
-                  ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -367,14 +411,17 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   Future<void> _showZoom(ComicItemRecord item) async {
+    final night =
+        widget.controller.preferences.surfaceMode == ReaderSurfaceMode.night;
+    final background = night ? Colors.black : ShelfColors.paper;
     await Navigator.of(context).push(
       PageRouteBuilder<void>(
         opaque: true,
         pageBuilder: (context, animation, secondaryAnimation) => Scaffold(
-          backgroundColor: Colors.black,
+          backgroundColor: background,
           appBar: AppBar(
-            backgroundColor: Colors.black,
-            foregroundColor: Colors.white,
+            backgroundColor: night ? Colors.black : Colors.white,
+            foregroundColor: night ? Colors.white : ShelfColors.blue,
             title: Text('${_currentIndex + 1} / ${_items.length}'),
           ),
           body: InteractiveViewer(
@@ -384,96 +431,6 @@ class _ReaderScreenState extends State<ReaderScreen>
               child: Image.file(
                 File(widget.controller.filePath(item.asset.storedPath)),
                 fit: BoxFit.contain,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ReaderTopBar extends StatelessWidget {
-  const _ReaderTopBar({
-    required this.visible,
-    required this.title,
-    required this.onBack,
-    required this.onRestart,
-    required this.onBookmark,
-    required this.onSettings,
-  });
-
-  final bool visible;
-  final String title;
-  final VoidCallback onBack;
-  final VoidCallback onRestart;
-  final VoidCallback onBookmark;
-  final VoidCallback onSettings;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedSlide(
-      offset: visible ? Offset.zero : const Offset(0, -1),
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOut,
-      child: AnimatedOpacity(
-        opacity: visible ? 1 : 0,
-        duration: const Duration(milliseconds: 160),
-        child: IgnorePointer(
-          ignoring: !visible,
-          child: Container(
-            color: const Color(0xE6111418),
-            child: SafeArea(
-              bottom: false,
-              child: SizedBox(
-                height: 56,
-                child: Row(
-                  children: <Widget>[
-                    IconButton(
-                      onPressed: onBack,
-                      color: Colors.white,
-                      icon: const Icon(Icons.arrow_back_ios_new_rounded),
-                    ),
-                    Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: '收藏当前页',
-                      onPressed: onBookmark,
-                      color: Colors.white,
-                      icon: const Icon(Icons.bookmark_add_outlined),
-                    ),
-                    IconButton(
-                      tooltip: '阅读设置',
-                      onPressed: onSettings,
-                      color: Colors.white,
-                      icon: const Icon(Icons.settings_outlined),
-                    ),
-                    PopupMenuButton<String>(
-                      color: const Color(0xFF20242A),
-                      iconColor: Colors.white,
-                      onSelected: (_) => onRestart(),
-                      itemBuilder: (context) => const <PopupMenuEntry<String>>[
-                        PopupMenuItem(
-                          value: 'restart',
-                          child: Text(
-                            '从头开始',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
               ),
             ),
           ),

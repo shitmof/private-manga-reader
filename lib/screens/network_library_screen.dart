@@ -6,6 +6,7 @@ import '../models/entities.dart';
 import '../state/app_controller.dart';
 import '../theme.dart';
 import '../widgets/formatters.dart';
+import '../widgets/shelf_page_route.dart';
 import 'remote_reader_screen.dart';
 
 class NetworkLibraryScreen extends StatelessWidget {
@@ -116,7 +117,7 @@ class NetworkLibraryScreen extends StatelessWidget {
       await controller.prepareRemoteBook(book.id);
       if (!context.mounted) return;
       await Navigator.of(context).push(
-        MaterialPageRoute<void>(
+        buildShelfReaderRoute<void>(
           builder: (_) =>
               RemoteReaderScreen(controller: controller, bookId: book.id),
         ),

@@ -1,5 +1,7 @@
 enum AppThemePreference { system, light, dark }
 
+enum ReaderSurfaceMode { paper, night }
+
 enum ReadingStatus { unread, reading, completed, paused }
 
 enum ShelfEntryKind { folder, comic }
@@ -281,6 +283,7 @@ class ReaderPreferences {
     this.rememberProgress = true,
     this.readerBrightness = 0.72,
     this.theme = AppThemePreference.system,
+    this.surfaceMode = ReaderSurfaceMode.paper,
   });
 
   final double imageGap;
@@ -288,6 +291,7 @@ class ReaderPreferences {
   final bool rememberProgress;
   final double readerBrightness;
   final AppThemePreference theme;
+  final ReaderSurfaceMode surfaceMode;
 
   ReaderPreferences copyWith({
     double? imageGap,
@@ -295,12 +299,14 @@ class ReaderPreferences {
     bool? rememberProgress,
     double? readerBrightness,
     AppThemePreference? theme,
+    ReaderSurfaceMode? surfaceMode,
   }) => ReaderPreferences(
     imageGap: imageGap ?? this.imageGap,
     showPageNumber: showPageNumber ?? this.showPageNumber,
     rememberProgress: rememberProgress ?? this.rememberProgress,
     readerBrightness: readerBrightness ?? this.readerBrightness,
     theme: theme ?? this.theme,
+    surfaceMode: surfaceMode ?? this.surfaceMode,
   );
 }
 

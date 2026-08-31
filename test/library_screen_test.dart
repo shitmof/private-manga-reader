@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:private_manga_reader/data/app_database.dart';
 import 'package:private_manga_reader/data/library_repository.dart';
 import 'package:private_manga_reader/data/network_repository.dart';
+import 'package:private_manga_reader/models/entities.dart';
 import 'package:private_manga_reader/screens/library_screen.dart';
 import 'package:private_manga_reader/services/archive_import_service.dart';
 import 'package:private_manga_reader/services/backup_service.dart';
@@ -167,6 +168,10 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 400));
 
+    final scopeSwitcher = tester.widget<AnimatedSwitcher>(
+      find.byKey(const ValueKey<String>('library-scope-switcher')),
+    );
+    expect(scopeSwitcher.duration, const Duration(milliseconds: 280));
     final grid = tester.widget<GridView>(
       find.byKey(const ValueKey<String>('library-three-column-grid')),
     );
@@ -175,7 +180,18 @@ void main() {
           .crossAxisCount,
       3,
     );
+    final delegate =
+        grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount;
+    expect(grid.padding, const EdgeInsets.fromLTRB(16, 12, 16, 104));
+    expect(delegate.crossAxisSpacing, 14);
+    expect(delegate.mainAxisSpacing, 24);
+    expect(delegate.mainAxisExtent, greaterThan(190));
+    expect(tester.widget<Text>(find.text('第一本')).maxLines, 2);
     expect(find.text('待看漫画'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('folder-mosaic-surface')),
+      findsOneWidget,
+    );
     for (var index = 0; index < 4; index++) {
       expect(
         find.byKey(ValueKey<String>('folder-mosaic-slot-$index')),
@@ -197,6 +213,12 @@ void main() {
     await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
     expect(find.byType(Slider), findsNothing);
+    expect(find.text('阅读画布'), findsOneWidget);
+    expect(find.text('画纸'), findsOneWidget);
+    expect(find.text('夜间'), findsOneWidget);
+    await tester.tap(find.text('夜间'));
+    await tester.pumpAndSettle();
+    expect(controller.preferences.surfaceMode, ReaderSurfaceMode.night);
     await tester.tap(find.text('图片间距'));
     await tester.pumpAndSettle();
     expect(find.text('只改变阅读显示，不处理或重编码原图。'), findsOneWidget);
@@ -297,15 +319,33 @@ void main() {
 
     final source = find.byKey(ValueKey<String>('shelf-entry-comic:$sourceId'));
     final target = find.byKey(ValueKey<String>('shelf-entry-comic:$targetId'));
+    final sourceSize = tester.getSize(source);
     final gesture = await tester.startGesture(tester.getCenter(source));
     await tester.pump(const Duration(milliseconds: 600));
+    expect(
+      tester.getSize(find.byKey(const ValueKey<String>('shelf-drag-feedback'))),
+      sourceSize,
+    );
     await gesture.moveTo(tester.getCenter(target));
     await tester.pump(const Duration(milliseconds: 700));
+    final targetScale = tester.widget<AnimatedScale>(
+      find.byKey(ValueKey<String>('shelf-drop-scale-comic:$targetId')),
+    );
+    expect(targetScale.scale, greaterThan(1));
     await gesture.up();
     await tester.pumpAndSettle();
 
-    expect(find.text('合成书单'), findsOneWidget);
+    expect(find.text('合成书单'), findsNWidgets(2));
     expect(find.text('是否将《拖动来源》和《合组目标》合成一个书单？'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('shelf-group-composer-sheet')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('shelf-group-composer-preview')),
+      findsOneWidget,
+    );
+    expect(find.byType(AlertDialog), findsNothing);
     await tester.tap(find.widgetWithText(TextButton, '取消'));
     await tester.pumpAndSettle();
     expect(controller.folders, isEmpty);
@@ -318,7 +358,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 700));
     await confirmGesture.up();
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '合成'));
+    await tester.tap(find.widgetWithText(FilledButton, '合成书单'));
     await tester.pumpAndSettle();
     for (var attempt = 0; attempt < 40; attempt++) {
       if (controller.folders.isNotEmpty &&
@@ -681,6 +721,11 @@ void main() {
 
     expect(find.text('加入书单'), findsOneWidget);
     expect(find.text('是否将《待加入漫画》加入《周末书单》？'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('shelf-add-to-group-sheet')),
+      findsOneWidget,
+    );
+    expect(find.byType(AlertDialog), findsNothing);
     expect(controller.summaryFor(comicId)!.comic.folderId, isNull);
     await tester.tap(find.widgetWithText(TextButton, '取消'));
     await tester.pumpAndSettle();

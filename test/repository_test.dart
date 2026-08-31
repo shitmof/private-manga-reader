@@ -56,6 +56,23 @@ void main() {
     expect((await repository.loadPreferences()).imageGap, 0);
   });
 
+  test('阅读画布默认使用白蓝画纸且夜间选择可以持久保存', () async {
+    expect(const ReaderPreferences().surfaceMode, ReaderSurfaceMode.paper);
+    expect(
+      (await repository.loadPreferences()).surfaceMode,
+      ReaderSurfaceMode.paper,
+    );
+
+    await repository.savePreferences(
+      const ReaderPreferences(surfaceMode: ReaderSurfaceMode.night),
+    );
+
+    expect(
+      (await repository.loadPreferences()).surfaceMode,
+      ReaderSurfaceMode.night,
+    );
+  });
+
   test('v6 升级仅迁移旧版默认图片间距并保留其他设置', () async {
     final path = p.join(sandbox.path, 'legacy-v6-gap.db');
     final legacy = await databaseFactoryFfi.openDatabase(
@@ -88,7 +105,41 @@ void main() {
 
     expect(preferences.imageGap, 0);
     expect(preferences.readerBrightness, 0.46);
-    expect(File('$path.pre-v7').existsSync(), isTrue);
+    expect(File('$path.pre-v8').existsSync(), isTrue);
+    await migratedDatabase.close();
+  });
+
+  test('v7 升级为白蓝阅读默认值并创建升级前快照', () async {
+    final path = p.join(sandbox.path, 'legacy-v7-reader-surface.db');
+    final legacy = await databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 7,
+        onCreate: (db, version) async {
+          await db.execute(
+            'CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+          );
+        },
+      ),
+    );
+    await legacy.insert('settings', <String, Object?>{
+      'key': 'reader_brightness',
+      'value': '0.54',
+    });
+    await legacy.close();
+
+    final migratedDatabase = AppDatabase(
+      factory: databaseFactoryFfi,
+      overridePath: path,
+    );
+    final migratedRepository = LibraryRepository(migratedDatabase);
+    final preferences = await migratedRepository.loadPreferences();
+    final migrated = await migratedDatabase.instance;
+
+    expect(await migrated.getVersion(), 8);
+    expect(preferences.surfaceMode, ReaderSurfaceMode.paper);
+    expect(preferences.readerBrightness, 0.54);
+    expect(File('$path.pre-v8').existsSync(), isTrue);
     await migratedDatabase.close();
   });
 

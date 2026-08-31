@@ -35,6 +35,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
             margin: EdgeInsets.zero,
             child: Column(
               children: <Widget>[
+                const ListTile(
+                  title: Text('阅读画布'),
+                  subtitle: Text('默认使用白蓝画纸；夜间模式仅改变阅读页'),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<ReaderSurfaceMode>(
+                      key: const ValueKey<String>('reader-surface-setting'),
+                      showSelectedIcon: false,
+                      segments: const <ButtonSegment<ReaderSurfaceMode>>[
+                        ButtonSegment(
+                          value: ReaderSurfaceMode.paper,
+                          icon: Icon(Icons.light_mode_outlined),
+                          label: Text('画纸'),
+                        ),
+                        ButtonSegment(
+                          value: ReaderSurfaceMode.night,
+                          icon: Icon(Icons.dark_mode_outlined),
+                          label: Text('夜间'),
+                        ),
+                      ],
+                      selected: <ReaderSurfaceMode>{preferences.surfaceMode},
+                      onSelectionChanged: (selection) async {
+                        await widget.controller.updatePreferences(
+                          preferences.copyWith(surfaceMode: selection.first),
+                        );
+                        if (mounted) setState(() {});
+                      },
+                    ),
+                  ),
+                ),
+                const Divider(height: 1, indent: 16),
                 ListTile(
                   title: const Text('图片间距'),
                   subtitle: const Text('调整连续阅读时图片之间的留白'),
@@ -247,7 +281,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 24),
           const Center(
             child: Text(
-              '拾画阁 1.4.0',
+              '拾画阁 1.5.0',
               style: TextStyle(color: ShelfColors.muted, fontSize: 12),
             ),
           ),

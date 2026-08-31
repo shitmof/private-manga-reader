@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../theme.dart';
+
 class ReaderEdgeScrubber extends StatefulWidget {
   const ReaderEdgeScrubber({
     required this.currentFraction,
@@ -11,6 +13,7 @@ class ReaderEdgeScrubber extends StatefulWidget {
     required this.onChangeStart,
     required this.onChanged,
     required this.onChangeEnd,
+    this.night = false,
     super.key,
   });
 
@@ -20,6 +23,7 @@ class ReaderEdgeScrubber extends StatefulWidget {
   final ValueChanged<double> onChangeStart;
   final ValueChanged<double> onChanged;
   final ValueChanged<double> onChangeEnd;
+  final bool night;
 
   @override
   State<ReaderEdgeScrubber> createState() => _ReaderEdgeScrubberState();
@@ -120,7 +124,9 @@ class _ReaderEdgeScrubberState extends State<ReaderEdgeScrubber> {
                           ),
                           width: 3,
                           decoration: BoxDecoration(
-                            color: Colors.white30,
+                            color: widget.night
+                                ? Colors.white30
+                                : ShelfColors.blue.withValues(alpha: 0.18),
                             borderRadius: BorderRadius.circular(3),
                           ),
                         ),
@@ -131,10 +137,15 @@ class _ReaderEdgeScrubberState extends State<ReaderEdgeScrubber> {
                             (constraints.maxHeight - 28) *
                             widget.currentFraction.clamp(0, 1),
                         child: Container(
+                          key: const ValueKey<String>(
+                            'reader-fast-scrubber-thumb',
+                          ),
                           width: 15,
                           height: 28,
                           decoration: BoxDecoration(
-                            color: const Color(0xFF78ADE5),
+                            color: widget.night
+                                ? const Color(0xFF78ADE5)
+                                : ShelfColors.blue,
                             borderRadius: BorderRadius.circular(8),
                             boxShadow: const <BoxShadow>[
                               BoxShadow(color: Colors.black45, blurRadius: 5),
@@ -150,18 +161,37 @@ class _ReaderEdgeScrubberState extends State<ReaderEdgeScrubber> {
                                       widget.currentFraction.clamp(0, 1))
                                   .clamp(0, constraints.maxHeight - 42),
                           child: Container(
+                            key: const ValueKey<String>(
+                              'reader-fast-scrubber-label',
+                            ),
                             padding: const EdgeInsets.symmetric(
                               horizontal: 10,
                               vertical: 6,
                             ),
                             decoration: BoxDecoration(
-                              color: const Color(0xE6111418),
+                              color: widget.night
+                                  ? const Color(0xE6111418)
+                                  : Colors.white,
                               borderRadius: BorderRadius.circular(9),
+                              border: widget.night
+                                  ? null
+                                  : Border.all(color: ShelfColors.line),
+                              boxShadow: widget.night
+                                  ? const <BoxShadow>[]
+                                  : const <BoxShadow>[
+                                      BoxShadow(
+                                        color: Color(0x14173A63),
+                                        blurRadius: 14,
+                                        offset: Offset(0, 4),
+                                      ),
+                                    ],
                             ),
                             child: Text(
                               '${widget.currentPage} / ${widget.totalPages}',
-                              style: const TextStyle(
-                                color: Colors.white,
+                              style: TextStyle(
+                                color: widget.night
+                                    ? Colors.white
+                                    : ShelfColors.blue,
                                 fontWeight: FontWeight.w700,
                                 fontSize: 12,
                               ),
