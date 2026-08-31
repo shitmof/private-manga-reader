@@ -20,7 +20,8 @@
 - 导入前估算体积，Android 实机检查私有目录所在磁盘的可用空间
 - 永久原图与可清理、可重建的缩略图缓存分离
 - 懒加载纵向阅读、横图完整显示、双击放大、阅读亮度、页面书签和阅读位置恢复
-- 阅读器右侧可拖动快速定位条与底部页码滑块，600～1000 页也可直接跳转
+- 阅读器右侧设 48dp 隐形热区：仅触碰或拖动时显示纵向定位条，松手约 1.1 秒后完全隐藏；600～1000 页也可直接跳转
+- 阅读控制层只显示紧凑页码胶囊，不再显示横跨底部的进度 Slider；新安装默认图片间距为 0dp
 - 漫画自定义拖动排序、浅色/深色/跟随系统主题
 - 完整 `.mangabackup` 备份与恢复；可通过系统文档选择器保存到手机、SD 卡或云盘，卸载后仍可找回
 - 漫画移入回收站、恢复、永久删除；页面多选删除与无引用原图清理彼此分离
@@ -36,9 +37,9 @@
 
 ## 下载 Android 安装包
 
-- [下载拾画阁 v1.3.0 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.3.0/shihuage-v1.3.0-android.apk)
-- 文件大小：66,461,238 字节（约 63.4 MiB）
-- SHA-256：`C00FE7E1B244AED227E8A82EE19BCEEB7E878CE2F1520880D5AAF23E0CBC7A4C`
+- [下载拾画阁 v1.4.0 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.4.0/shihuage-v1.4.0-android.apk)
+- 文件大小：66,526,982 字节（约 63.4 MiB）
+- SHA-256：`A17D06768B658E5DDA62A469EB01AAC1A9F752F3CF1AFD0500DC751437BC6514`
 - 兼容 ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`
 
 仓库是私有仓库，下载时需要登录获授权的 GitHub 账号。
@@ -55,7 +56,8 @@ App Documents/private_shelf/
 
 Application Support/
 ├── library.db       # 漫画、书源索引、引用顺序、封面、进度和设置
-└── library.db.pre-v6 # 首次升级 v1.3 前自动保留的数据库快照
+├── library.db.pre-v6 # 首次升级 v1.3 前自动保留的数据库快照
+└── library.db.pre-v7 # 首次升级 v1.4 前自动保留的数据库快照
 ```
 
 SQLite 只保存相对路径。备份恢复到另一台设备时不会依赖旧设备绝对路径。
@@ -79,6 +81,8 @@ Windows 上 Flutter AOT 对中文真实路径仍有兼容性边界。代码保�
 ## 产品与回退
 
 - 产品行为规格：[docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md)
+- v1.4 主书架拖动、合组与阅读交互规格：[docs/V1.3.1_SHELF_DRAG_GROUP_READER_CORRECTION_SPEC.md](docs/V1.3.1_SHELF_DRAG_GROUP_READER_CORRECTION_SPEC.md)
+- v1.4 发布说明：[docs/RELEASE_NOTES_V1.4.0.md](docs/RELEASE_NOTES_V1.4.0.md)
 - v1.3 品牌、书架与低占用存储方案：[docs/V1.3_SHIHUAGE_BRAND_UI_STORAGE_PLAN.md](docs/V1.3_SHIHUAGE_BRAND_UI_STORAGE_PLAN.md)
 - v1.3 发布说明：[docs/RELEASE_NOTES_V1.3.0.md](docs/RELEASE_NOTES_V1.3.0.md)
 - v1.2 总体设计与实施结果：[docs/V1.2_SHELF_GROUPING_READER_NAVIGATION_DESIGN.md](docs/V1.2_SHELF_GROUPING_READER_NAVIGATION_DESIGN.md)
