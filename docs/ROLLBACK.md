@@ -1,6 +1,6 @@
 # 版本上传与回退
 
-GitHub 私有仓库是源码与安装包的远端回退点；手机内漫画数据通过 `.mangabackup` 独立备份。两者不要混用。
+GitHub 仓库是源码与安装包的远端回退点；手机内漫画数据通过 `.mangabackup` 独立备份。两者不要混用。
 
 ## 开发升级：往上发送
 
@@ -14,8 +14,8 @@ git push origin main --follow-tags
 发布稳定版本时创建注释标签：
 
 ```powershell
-git tag -a v1.4.0 -m "Shihuage v1.4.0"
-git push origin v1.4.0
+git tag -a v1.5.0 -m "Shihuage v1.5.0"
+git push origin v1.5.0
 ```
 
 ## 查看回退点
@@ -45,6 +45,8 @@ git tag --list
 - `checkpoint-v1.4-shelf-reader`：书碰书原子合组、主书架拖动和阅读器按需纵向定位完成点。
 - `checkpoint-v1.4-final-code`：书单内部排序与拖回主书架闭环完成点。
 - `v1.4.0`：主书架直接拖动、跨屏边缘滚动、确认合组、书单内外移动与无横线阅读器正式版。
+- `backup-pre-v1.5-20260831`：白蓝阅读器、动态白色书单与统一动效实施前的 V1.4 稳定点。
+- `v1.5.0`：白蓝阅读器、独立夜间偏好、三列卡片节奏、动态白色书单和合组确认面板正式版。
 
 ## 安全回退：往下取版本
 
@@ -70,4 +72,4 @@ Android 不允许把较低 `versionCode` 的 APK 直接覆盖到较高版本。�
 
 私人漫画数据不会自动进入 GitHub。
 
-升级 APK 不会移动或重编码 `assets/`。数据库首次升级到 schema 6、7 前分别会自动保留 `library.db.pre-v6`、`library.db.pre-v7`；完整书架的数据回退仍以升级前导出的 `.mangabackup` 为准。SAF 挂载的原文件始终位于用户选择的外部目录，恢复备份后需要重新选择该目录恢复授权。
+升级 APK 不会移动或重编码 `assets/`。数据库首次升级到 schema 6、7、8 前分别会自动保留 `library.db.pre-v6`、`library.db.pre-v7`、`library.db.pre-v8`；完整书架的数据回退仍以升级前导出的 `.mangabackup` 为准。SAF 挂载的原文件始终位于用户选择的外部目录，恢复备份后需要重新选择该目录恢复授权。

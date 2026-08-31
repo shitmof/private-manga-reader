@@ -37,12 +37,12 @@
 
 ## 下载 Android 安装包
 
-- [下载拾画阁 v1.4.0 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.4.0/shihuage-v1.4.0-android.apk)
-- 文件大小：66,526,982 字节（约 63.4 MiB）
-- SHA-256：`A17D06768B658E5DDA62A469EB01AAC1A9F752F3CF1AFD0500DC751437BC6514`
+- [下载拾画阁 v1.5.0 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.5.0/shihuage-v1.5.0-android.apk)
+- 文件大小：66,641,718 字节（约 63.6 MiB）
+- SHA-256：`9257102E4385C3DD1669C7628549124A35F53CA259D90E342EC74DFA6A056236`
 - 兼容 ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`
 
-仓库是私有仓库，下载时需要登录获授权的 GitHub 账号。
+仓库与 Release 已公开，无需登录即可下载。仓库当前未附加开源许可证，默认保留所有权利；公开不代表自动授权复制、修改或再分发。
 
 ## 数据结构
 
@@ -57,7 +57,8 @@ App Documents/private_shelf/
 Application Support/
 ├── library.db       # 漫画、书源索引、引用顺序、封面、进度和设置
 ├── library.db.pre-v6 # 首次升级 v1.3 前自动保留的数据库快照
-└── library.db.pre-v7 # 首次升级 v1.4 前自动保留的数据库快照
+├── library.db.pre-v7 # 首次升级 v1.4 前自动保留的数据库快照
+└── library.db.pre-v8 # 首次升级 v1.5 前自动保留的数据库快照
 ```
 
 SQLite 只保存相对路径。备份恢复到另一台设备时不会依赖旧设备绝对路径。
@@ -81,6 +82,8 @@ Windows 上 Flutter AOT 对中文真实路径仍有兼容性边界。代码保�
 ## 产品与回退
 
 - 产品行为规格：[docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md)
+- v1.5 白蓝阅读器、统一动效与动态书单规格：[docs/V1.5_LIGHT_READER_MOTION_COLLECTION_DESIGN.md](docs/V1.5_LIGHT_READER_MOTION_COLLECTION_DESIGN.md)
+- v1.5 发布说明：[docs/RELEASE_NOTES_V1.5.0.md](docs/RELEASE_NOTES_V1.5.0.md)
 - v1.4 主书架拖动、合组与阅读交互规格：[docs/V1.3.1_SHELF_DRAG_GROUP_READER_CORRECTION_SPEC.md](docs/V1.3.1_SHELF_DRAG_GROUP_READER_CORRECTION_SPEC.md)
 - v1.4 发布说明：[docs/RELEASE_NOTES_V1.4.0.md](docs/RELEASE_NOTES_V1.4.0.md)
 - v1.3 品牌、书架与低占用存储方案：[docs/V1.3_SHIHUAGE_BRAND_UI_STORAGE_PLAN.md](docs/V1.3_SHIHUAGE_BRAND_UI_STORAGE_PLAN.md)
