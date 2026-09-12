@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.StatFs
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import android.util.Log
 import android.view.WindowManager
 import androidx.activity.result.contract.ActivityResultContracts
 import io.flutter.embedding.android.FlutterFragmentActivity
@@ -13,10 +14,10 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.security.MessageDigest
 import java.util.ArrayDeque
 import java.util.UUID
 import java.util.zip.ZipFile
-import java.util.zip.ZipInputStream
 
 class MainActivity : FlutterFragmentActivity() {
     private var pendingSaveResult: MethodChannel.Result? = null
@@ -25,6 +26,13 @@ class MainActivity : FlutterFragmentActivity() {
     private var pendingMountResult: MethodChannel.Result? = null
     private var flutterReadyForArchives = false
     private val pendingArchives = mutableListOf<Map<String, String>>()
+
+    companion object {
+        private const val TAG = "ShihuageMount"
+        private const val MAX_PAGE_BYTES = 128 * 1024 * 1024
+        private const val ARCHIVE_CACHE_LIMIT = 6
+        private const val PART_STALE_MILLIS = 60 * 60 * 1000L
+    }
 
     private val createBackupDocument =
         registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
@@ -309,92 +317,125 @@ class MainActivity : FlutterFragmentActivity() {
     )
 
     private fun listZipEntries(uri: Uri): List<Map<String, Any>> {
-        try {
-            contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
-                ZipFile(File("/proc/self/fd/${descriptor.fd}")).use { zip ->
-                    return zip.entries().asSequence()
-                        .filter { !it.isDirectory && isImage(it.name) }
-                        .take(10000)
-                        .map { entry ->
-                            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                            zip.getInputStream(entry).use { input ->
-                                BitmapFactory.decodeStream(input, null, options)
-                            }
-                            mapOf(
-                                "name" to entry.name,
-                                "size" to entry.size.coerceAtLeast(0L),
-                                "width" to options.outWidth.coerceAtLeast(0),
-                                "height" to options.outHeight.coerceAtLeast(0),
-                            )
-                        }
-                        .toList()
-                }
-            }
-        } catch (_: Exception) {
-            // 某些云盘文档提供者只暴露流；下方退回顺序扫描。
-        }
-        val result = mutableListOf<Map<String, Any>>()
-        contentResolver.openInputStream(uri)?.buffered(1024 * 1024).use { input ->
-            requireNotNull(input) { "无法打开漫画压缩包" }
-            ZipInputStream(input).use { zip ->
-                var entry = zip.nextEntry
-                while (entry != null && result.size < 10000) {
-                    if (!entry.isDirectory && isImage(entry.name)) {
-                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeStream(zip, null, options)
-                        result.add(
-                            mapOf(
-                                "name" to entry.name,
-                                "size" to entry.size.coerceAtLeast(0L),
-                                "width" to options.outWidth.coerceAtLeast(0),
-                                "height" to options.outHeight.coerceAtLeast(0),
-                            ),
-                        )
+        openZip(uri).use { zip ->
+            val entries = zip.entries().asSequence()
+                .filter { !it.isDirectory && isImage(it.name) }
+                .take(10000)
+                .map { entry ->
+                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    zip.getInputStream(entry).use { input ->
+                        BitmapFactory.decodeStream(input, null, options)
                     }
-                    zip.closeEntry()
-                    entry = zip.nextEntry
+                    mapOf(
+                        "name" to entry.name,
+                        "size" to entry.size.coerceAtLeast(0L),
+                        "width" to options.outWidth.coerceAtLeast(0),
+                        "height" to options.outHeight.coerceAtLeast(0),
+                    )
+                }
+                .toList()
+            Log.i(TAG, "listZipEntries 索引到 ${entries.size} 张")
+            return entries
+        }
+    }
+
+    /// 把内容 URI 落成缓存文件，以便用中央目录打开。
+    ///
+    /// 为什么必须这么做：顺序读取（ZipInputStream）无法处理
+    /// 「STORED(method=0) + data descriptor(bit 3)」这种合法但少见的打包方式 ——
+    /// 它的 getNextEntry() 在 readLOC 里会直接抛
+    /// ZipException: only DEFLATED entries can have EXT descriptor，
+    /// 导致一个条目都读不出来（实测用户提供的 CBZ 全部是这种格式）。
+    /// ZipFile 读的是中央目录（那里 compressedSize 有值），完全不受影响；
+    /// 云盘类文档提供者只暴露流时，就只能先落到本地再走中央目录。
+    /// 缓存名由 uri 摘要决定，同一文档只复制一次。
+    private fun materializeToCache(uri: Uri): File? {
+        val digest = MessageDigest.getInstance("SHA-1")
+            .digest(uri.toString().toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        val cached = File(cacheDir, "mount-archive/$digest.zip")
+        if (cached.exists() && cached.length() > 0) return cached
+        cached.parentFile?.mkdirs()
+        val staging = File(cached.parentFile, "$digest.part")
+        return try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                staging.outputStream().buffered(1024 * 1024).use { output ->
+                    input.copyTo(output, bufferSize = 1024 * 1024)
+                }
+            } ?: return null
+            if (cached.exists()) cached.delete()
+            if (!staging.renameTo(cached)) {
+                staging.copyTo(cached, overwrite = true)
+                staging.delete()
+            }
+            Log.i(TAG, "已缓存挂载压缩包用于随机读取：${cached.name} (${cached.length()} 字节)")
+            cached
+        } catch (error: Exception) {
+            Log.w(TAG, "缓存挂载压缩包失败", error)
+            staging.delete()
+            null
+        }
+    }
+
+    /// 尝试把 uri 当作真实文件打开；失败返回 null。
+    private fun openDirectZip(uri: Uri): ZipFile? = try {
+        contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+            ZipFile(File("/proc/self/fd/${descriptor.fd}"))
+        }
+    } catch (error: Exception) {
+        Log.w(TAG, "随机读取不可用", error)
+        null
+    }
+
+    /// 先试直接随机读取，失败则物化到缓存再读。
+    private fun openZip(uri: Uri): ZipFile {
+        openDirectZip(uri)?.let { return it }
+        val cached = materializeToCache(uri) ?: throw IllegalStateException("无法读取该压缩包")
+        pruneArchiveCache(cached)
+        return ZipFile(cached)
+    }
+
+    /// 修剪物化缓存，避免长期使用后无限增长。
+    ///
+    /// 保留最近使用的一小批；只删本方法自己创建的 mount-archive/*.zip 与残留 .part，
+    /// 不触碰缓存目录下的其它内容。
+    private fun pruneArchiveCache(keep: File) {
+        try {
+            val directory = File(cacheDir, "mount-archive")
+            val files = directory.listFiles()?.filter { it.isFile } ?: return
+            val ordered = files.sortedByDescending { it.lastModified() }
+            var kept = 0
+            for (file in ordered) {
+                val isKeepTarget = file.absolutePath == keep.absolutePath
+                val isStale = file.name.endsWith(".part") &&
+                    System.currentTimeMillis() - file.lastModified() > PART_STALE_MILLIS
+                if (isKeepTarget || (kept < ARCHIVE_CACHE_LIMIT && !isStale)) {
+                    kept++
+                    continue
+                }
+                if (file.delete()) {
+                    Log.i(TAG, "已清理物化缓存：${file.name}")
                 }
             }
+        } catch (error: Exception) {
+            Log.w(TAG, "清理物化缓存失败", error)
         }
-        return result
     }
 
     private fun readPage(uri: Uri, archiveEntry: String?): ByteArray {
         if (archiveEntry == null) {
             contentResolver.openInputStream(uri).use { input ->
                 requireNotNull(input) { "无法读取图片" }
-                return readLimited(input, 128 * 1024 * 1024)
+                return readLimited(input, MAX_PAGE_BYTES)
             }
         }
-        try {
-            contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
-                ZipFile(File("/proc/self/fd/${descriptor.fd}")).use { zip ->
-                    val entry = zip.getEntry(archiveEntry)
-                        ?: throw IllegalArgumentException("漫画页已不存在")
-                    zip.getInputStream(entry).use { input ->
-                        return readLimited(input, 128 * 1024 * 1024)
-                    }
-                }
-            }
-        } catch (error: IllegalArgumentException) {
-            throw error
-        } catch (_: Exception) {
-            // 文档提供者不支持随机读取时，退回 ZipInputStream 顺序查找。
-        }
-        contentResolver.openInputStream(uri)?.buffered(1024 * 1024).use { input ->
-            requireNotNull(input) { "无法打开漫画压缩包" }
-            ZipInputStream(input).use { zip ->
-                var entry = zip.nextEntry
-                while (entry != null) {
-                    if (!entry.isDirectory && entry.name == archiveEntry) {
-                        return readLimited(zip, 128 * 1024 * 1024)
-                    }
-                    zip.closeEntry()
-                    entry = zip.nextEntry
-                }
+        openZip(uri).use { zip ->
+            val entry = zip.getEntry(archiveEntry)
+                ?: throw IllegalArgumentException("漫画页已不存在")
+            zip.getInputStream(entry).use { input ->
+                return readLimited(input, MAX_PAGE_BYTES)
             }
         }
-        throw IllegalArgumentException("漫画页已不存在")
     }
 
     private fun readLimited(input: java.io.InputStream, limit: Int): ByteArray {

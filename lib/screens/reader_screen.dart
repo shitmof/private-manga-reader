@@ -60,7 +60,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     });
     if (widget.controller.summaryFor(widget.comicId)?.comic.isPrivate ??
         false) {
-      await PrivateScreenGuard.setSecure(true);
+      await PrivateScreenGuard.acquireSecure();
     }
     await _applyBrightness(widget.controller.preferences.readerBrightness);
     WidgetsBinding.instance.addPostFrameCallback((_) => _restoreProgress());
@@ -80,7 +80,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     _scrollController.removeListener(_handleScroll);
     unawaited(_saveProgress());
     unawaited(ScreenBrightness().resetApplicationScreenBrightness());
-    unawaited(PrivateScreenGuard.setSecure(false));
+    unawaited(PrivateScreenGuard.releaseSecure());
     _scrollController.dispose();
     super.dispose();
   }
@@ -176,6 +176,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             if (!_loading && _items.length > 1)
               ReaderEdgeScrubber(
                 night: night,
+                enabled: widget.controller.preferences.readerScrubber,
                 currentFraction: _scrubbing
                     ? _scrubFraction
                     : _offsetIndex.fractionForPage(_currentIndex),
@@ -284,6 +285,7 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   Future<void> _showReaderSettings() async {
     var brightness = widget.controller.preferences.readerBrightness;
+    var autoBrightness = widget.controller.preferences.followSystemBrightness;
     var surfaceMode = widget.controller.preferences.surfaceMode;
     final bookmarks = await widget.controller.loadBookmarks(widget.comicId);
     if (!mounted) return;
@@ -337,6 +339,36 @@ class _ReaderScreenState extends State<ReaderScreen>
                     },
                   ),
                   const SizedBox(height: 18),
+                  SwitchListTile(
+                    key: const ValueKey<String>('reader-auto-brightness'),
+                    contentPadding: EdgeInsets.zero,
+                    value: autoBrightness,
+                    activeThumbColor: foreground,
+                    secondary: Icon(
+                      Icons.brightness_auto_outlined,
+                      color: secondary,
+                    ),
+                    title: Text('跟随手机亮度', style: TextStyle(color: foreground)),
+                    subtitle: Text(
+                      autoBrightness ? '当前使用手机自身亮度，未覆盖显示' : '使用应用内固定亮度，不随手机变化',
+                      style: TextStyle(color: secondary, fontSize: 12),
+                    ),
+                    onChanged: (value) {
+                      autoBrightness = value;
+                      setSheetState(() {});
+                      widget.controller.updatePreferences(
+                        widget.controller.preferences.copyWith(
+                          followSystemBrightness: value,
+                        ),
+                      );
+                      if (value) {
+                        // 交还控制权给系统，避免残留应用级覆盖。
+                        _releaseBrightnessOverride();
+                      } else {
+                        _applyBrightness(brightness);
+                      }
+                    },
+                  ),
                   Row(
                     children: <Widget>[
                       Icon(Icons.brightness_low, color: secondary),
@@ -345,15 +377,18 @@ class _ReaderScreenState extends State<ReaderScreen>
                           value: brightness,
                           min: 0.05,
                           max: 1,
-                          onChanged: (value) {
-                            brightness = value;
-                            setSheetState(() {});
-                            _applyBrightness(value);
-                          },
+                          onChanged: autoBrightness
+                              ? null
+                              : (value) {
+                                  brightness = value;
+                                  setSheetState(() {});
+                                  _applyBrightness(value);
+                                },
                           onChangeEnd: (value) =>
                               widget.controller.updatePreferences(
                                 widget.controller.preferences.copyWith(
                                   readerBrightness: value,
+                                  followSystemBrightness: false,
                                 ),
                               ),
                         ),
@@ -403,10 +438,20 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   Future<void> _applyBrightness(double value) async {
+    if (widget.controller.preferences.followSystemBrightness) return;
     try {
       await ScreenBrightness().setApplicationScreenBrightness(value);
     } catch (_) {
       // 桌面测试环境或不支持的设备保持系统亮度。
+    }
+  }
+
+  /// 交还亮度控制权给系统，用于用户切到"跟随手机亮度"。
+  Future<void> _releaseBrightnessOverride() async {
+    try {
+      await ScreenBrightness().resetApplicationScreenBrightness();
+    } catch (_) {
+      // 未设置过应用级亮度时部分平台会抛错，忽略即可。
     }
   }
 

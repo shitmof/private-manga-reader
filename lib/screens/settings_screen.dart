@@ -4,6 +4,7 @@ import '../models/entities.dart';
 import '../state/app_controller.dart';
 import '../theme.dart';
 import '../widgets/formatters.dart';
+import '../widgets/shelf_interactive.dart';
 import 'network_sources_screen.dart';
 import 'trash_screen.dart';
 
@@ -83,20 +84,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onTap: () => _chooseImageGap(preferences),
                 ),
                 const Divider(height: 1, indent: 16),
-                SwitchListTile(
-                  title: const Text('显示阅读页码'),
+                ShelfSwitchTile(
+                  title: '显示阅读页码',
                   value: preferences.showPageNumber,
                   onChanged: (value) => widget.controller.updatePreferences(
                     preferences.copyWith(showPageNumber: value),
                   ),
                 ),
                 const Divider(height: 1, indent: 16),
-                SwitchListTile(
-                  title: const Text('记住阅读位置'),
-                  subtitle: const Text('再次打开时回到上次位置'),
+                ShelfSwitchTile(
+                  title: '记住阅读位置',
+                  subtitle: '再次打开时回到上次位置',
                   value: preferences.rememberProgress,
                   onChanged: (value) => widget.controller.updatePreferences(
                     preferences.copyWith(rememberProgress: value),
+                  ),
+                ),
+                const Divider(height: 1, indent: 16),
+                ShelfSwitchTile(
+                  title: '跟随手机亮度',
+                  subtitle: '开启后不再使用应用内亮度，随手机亮度变化',
+                  value: preferences.followSystemBrightness,
+                  onChanged: (value) => widget.controller.updatePreferences(
+                    preferences.copyWith(followSystemBrightness: value),
+                  ),
+                ),
+                const Divider(height: 1, indent: 16),
+                ShelfSwitchTile(
+                  title: '阅读器快速定位条',
+                  subtitle: '关闭后右侧定位条不响应触摸，避免翻页误触跳页',
+                  value: preferences.readerScrubber,
+                  onChanged: (value) => widget.controller.updatePreferences(
+                    preferences.copyWith(readerScrubber: value),
                   ),
                 ),
               ],
@@ -270,18 +289,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 24),
           const _SectionLabel('隐私'),
-          const Card(
+          Card(
             margin: EdgeInsets.zero,
-            child: ListTile(
-              leading: Icon(Icons.lock_outline_rounded),
-              title: Text('完全本地'),
-              subtitle: Text('不建立 App 账号，没有社交、广告或云同步。网络书库始终只读，阅读记录只留在本机。'),
+            child: Column(
+              children: <Widget>[
+                ShelfSwitchTile(
+                  leading: Icon(
+                    preferences.incognito
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                  ),
+                  title: '无痕模式',
+                  subtitle: preferences.incognito
+                      ? '已开启：禁止截屏与录屏，切到后台时遮盖书架内容'
+                      : '开启后整个应用禁止截屏，并在切到后台时隐藏内容',
+                  value: preferences.incognito,
+                  onChanged: (value) => widget.controller.updatePreferences(
+                    preferences.copyWith(incognito: value),
+                  ),
+                ),
+                const Divider(height: 1, indent: 16),
+                const ListTile(
+                  leading: Icon(Icons.lock_outline_rounded),
+                  title: Text('完全本地'),
+                  subtitle: Text('不建立 App 账号，没有社交、广告或云同步。网络书库始终只读，阅读记录只留在本机。'),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 24),
           const Center(
             child: Text(
-              '拾画阁 1.5.0',
+              '拾画阁 1.6.0',
               style: TextStyle(color: ShelfColors.muted, fontSize: 12),
             ),
           ),

@@ -20,7 +20,7 @@
 - 导入前估算体积，Android 实机检查私有目录所在磁盘的可用空间
 - 永久原图与可清理、可重建的缩略图缓存分离
 - 懒加载纵向阅读、横图完整显示、双击放大、阅读亮度、页面书签和阅读位置恢复
-- 阅读器右侧设 48dp 隐形热区：仅触碰或拖动时显示纵向定位条，松手约 1.1 秒后完全隐藏；600～1000 页也可直接跳转
+- 阅读器右侧设 48dp 热区、可开关的纵向定位条：仅触碰或拖动时显示，松手约 1.1 秒后完全隐藏；600～1000 页也可直接跳转
 - 阅读控制层只显示紧凑页码胶囊，不再显示横跨底部的进度 Slider；新安装默认图片间距为 0dp
 - 漫画自定义拖动排序、浅色/深色/跟随系统主题
 - 完整 `.mangabackup` 备份与恢复；可通过系统文档选择器保存到手机、SD 卡或云盘，卸载后仍可找回
@@ -31,16 +31,19 @@
 - Android 文件关联：在文件管理器点击 CBZ/ZIP/CBR/RAR/CB7/7z/CBT/TAR 可直接进入导入流程
 - 本地漫画按当前编辑顺序无损导出 CBZ，并可保存到手机/云盘或调用系统分享
 - 网络密码使用 Android 安全存储，不进入 SQLite、完整备份或 GitHub
+- 无痕模式：一键禁止全应用截屏与录屏（`FLAG_SECURE` 引用计数），并在切到后台时遮盖界面；阅读章节自动叠加私密保护
+- 阅读亮度可跟随手机自身亮度，也可继续使用应用内固定亮度
 - 无 App 账号、无社交、无广告、无云同步，不把原图写回系统相册
 
 空书架不会注入演示漫画或虚假图片。设计原稿只保存在 `docs/design-reference/`，不会打包为用户内容。
 
 ## 下载 Android 安装包
 
-- [下载拾画阁 v1.5.0 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.5.0/shihuage-v1.5.0-android.apk)
-- 文件大小：66,641,718 字节（约 63.6 MiB）
-- SHA-256：`9257102E4385C3DD1669C7628549124A35F53CA259D90E342EC74DFA6A056236`
+- [下载拾画阁 v1.6.0 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.6.0/shihuage-v1.6.0-android.apk)
+- 文件大小与 SHA-256：见对应 Release 说明
 - 兼容 ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`
+- **注意**：该 APK 使用调试密钥签名，安装到已装发布密钥版本的手机会报签名不匹配，
+  需要先卸载旧版本。
 
 仓库与 Release 已公开，无需登录即可下载。仓库当前未附加开源许可证，默认保留所有权利；公开不代表自动授权复制、修改或再分发。
 
@@ -84,6 +87,7 @@ Windows 上 Flutter AOT 对中文真实路径仍有兼容性边界。代码保�
 - 产品行为规格：[docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md)
 - v1.5 白蓝阅读器、统一动效与动态书单规格：[docs/V1.5_LIGHT_READER_MOTION_COLLECTION_DESIGN.md](docs/V1.5_LIGHT_READER_MOTION_COLLECTION_DESIGN.md)
 - v1.5 发布说明：[docs/RELEASE_NOTES_V1.5.0.md](docs/RELEASE_NOTES_V1.5.0.md)
+- v1.6 发布说明：[docs/RELEASE_NOTES_V1.6.0.md](docs/RELEASE_NOTES_V1.6.0.md)
 - v1.4 主书架拖动、合组与阅读交互规格：[docs/V1.3.1_SHELF_DRAG_GROUP_READER_CORRECTION_SPEC.md](docs/V1.3.1_SHELF_DRAG_GROUP_READER_CORRECTION_SPEC.md)
 - v1.4 发布说明：[docs/RELEASE_NOTES_V1.4.0.md](docs/RELEASE_NOTES_V1.4.0.md)
 - v1.3 品牌、书架与低占用存储方案：[docs/V1.3_SHIHUAGE_BRAND_UI_STORAGE_PLAN.md](docs/V1.3_SHIHUAGE_BRAND_UI_STORAGE_PLAN.md)

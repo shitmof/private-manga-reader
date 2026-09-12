@@ -282,6 +282,9 @@ class ReaderPreferences {
     this.showPageNumber = true,
     this.rememberProgress = true,
     this.readerBrightness = 0.72,
+    this.followSystemBrightness = false,
+    this.readerScrubber = true,
+    this.incognito = false,
     this.theme = AppThemePreference.system,
     this.surfaceMode = ReaderSurfaceMode.paper,
   });
@@ -290,6 +293,16 @@ class ReaderPreferences {
   final bool showPageNumber;
   final bool rememberProgress;
   final double readerBrightness;
+
+  /// 开启后阅读器不再覆盖应用级亮度，完全跟随手机自身亮度。
+  final bool followSystemBrightness;
+
+  /// 关闭后右侧快速定位条不接收触摸，避免翻页时误触跳页。
+  final bool readerScrubber;
+
+  /// 全局无痕模式：整个应用禁止截屏与录屏，并在切到后台时遮盖内容。
+  final bool incognito;
+
   final AppThemePreference theme;
   final ReaderSurfaceMode surfaceMode;
 
@@ -298,6 +311,9 @@ class ReaderPreferences {
     bool? showPageNumber,
     bool? rememberProgress,
     double? readerBrightness,
+    bool? followSystemBrightness,
+    bool? readerScrubber,
+    bool? incognito,
     AppThemePreference? theme,
     ReaderSurfaceMode? surfaceMode,
   }) => ReaderPreferences(
@@ -305,6 +321,10 @@ class ReaderPreferences {
     showPageNumber: showPageNumber ?? this.showPageNumber,
     rememberProgress: rememberProgress ?? this.rememberProgress,
     readerBrightness: readerBrightness ?? this.readerBrightness,
+    followSystemBrightness:
+        followSystemBrightness ?? this.followSystemBrightness,
+    readerScrubber: readerScrubber ?? this.readerScrubber,
+    incognito: incognito ?? this.incognito,
     theme: theme ?? this.theme,
     surfaceMode: surfaceMode ?? this.surfaceMode,
   );

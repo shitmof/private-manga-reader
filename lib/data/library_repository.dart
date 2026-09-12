@@ -979,6 +979,9 @@ class LibraryRepository {
             0.05,
             1,
           ),
+      followSystemBrightness: values['follow_system_brightness'] == 'true',
+      readerScrubber: values['reader_scrubber'] != 'false',
+      incognito: values['incognito_mode'] == 'true',
       theme: AppThemePreference.values.firstWhere(
         (value) => value.name == themeName,
         orElse: () => AppThemePreference.system,
@@ -997,6 +1000,9 @@ class LibraryRepository {
       'show_page_number': preferences.showPageNumber.toString(),
       'remember_progress': preferences.rememberProgress.toString(),
       'reader_brightness': preferences.readerBrightness.toString(),
+      'follow_system_brightness': preferences.followSystemBrightness.toString(),
+      'reader_scrubber': preferences.readerScrubber.toString(),
+      'incognito_mode': preferences.incognito.toString(),
       'theme': preferences.theme.name,
       'reader_surface_mode': preferences.surfaceMode.name,
     };

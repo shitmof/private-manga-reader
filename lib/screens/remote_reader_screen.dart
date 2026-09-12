@@ -140,6 +140,7 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
             if (_pages.length > 1)
               ReaderEdgeScrubber(
                 night: night,
+                enabled: widget.controller.preferences.readerScrubber,
                 currentFraction: _scrubbing
                     ? _scrubFraction
                     : _offsetIndex.fractionForPage(_currentIndex),

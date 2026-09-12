@@ -9,6 +9,7 @@ import '../theme.dart';
 import '../widgets/formatters.dart';
 import '../widgets/import_flow.dart';
 import '../widgets/private_image.dart';
+import '../widgets/shelf_interactive.dart';
 import 'comic_detail_screen.dart';
 import 'editor_screen.dart';
 import 'network_sources_screen.dart';
@@ -955,10 +956,11 @@ class _EmptyLibrary extends StatelessWidget {
               style: TextStyle(color: ShelfColors.muted, height: 1.55),
             ),
             const SizedBox(height: 26),
-            FilledButton.icon(
+            ShelfGlowButton(
+              label: '开始建立书架',
+              icon: Icons.add_photo_alternate_outlined,
+              expanded: false,
               onPressed: onCreate,
-              icon: const Icon(Icons.add_photo_alternate_outlined),
-              label: const Text('开始建立书架'),
             ),
           ],
         ),

@@ -14,6 +14,7 @@ class ReaderEdgeScrubber extends StatefulWidget {
     required this.onChanged,
     required this.onChangeEnd,
     this.night = false,
+    this.enabled = true,
     super.key,
   });
 
@@ -25,11 +26,18 @@ class ReaderEdgeScrubber extends StatefulWidget {
   final ValueChanged<double> onChangeEnd;
   final bool night;
 
+  /// 关闭后不接收任何触摸，避免翻页时误触跳页。
+  final bool enabled;
+
   @override
   State<ReaderEdgeScrubber> createState() => _ReaderEdgeScrubberState();
 }
 
 class _ReaderEdgeScrubberState extends State<ReaderEdgeScrubber> {
+  /// 触摸热区宽度：必须窄到不会在正常上下滑动翻页时被误触，
+  /// 同时又要容得下 15dp 滑块加少量手指余量（此前是 48dp 全高，误触源）。
+  static const double _hitWidth = 26;
+
   Timer? _hideTimer;
   bool _visible = false;
   bool _dragging = false;
@@ -59,6 +67,16 @@ class _ReaderEdgeScrubberState extends State<ReaderEdgeScrubber> {
   }
 
   @override
+  void didUpdateWidget(ReaderEdgeScrubber oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.enabled && _visible) {
+      _hideTimer?.cancel();
+      _visible = false;
+      _dragging = false;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Positioned(
       right: 0,
@@ -75,130 +93,133 @@ class _ReaderEdgeScrubberState extends State<ReaderEdgeScrubber> {
 
           return Semantics(
             label: '快速定位滑轮，触摸后显示',
-            child: GestureDetector(
-              key: const ValueKey<String>('reader-fast-scrubber'),
-              behavior: HitTestBehavior.opaque,
-              onTapDown: (details) {
-                final value = fraction(details.globalPosition);
-                _reveal();
-                widget.onChangeStart(value);
-                widget.onChanged(value);
-              },
-              onTapUp: (details) {
-                widget.onChangeEnd(fraction(details.globalPosition));
-                _hideLater();
-              },
-              onTapCancel: _hideLater,
-              onVerticalDragStart: (details) {
-                final value = fraction(details.globalPosition);
-                _reveal(dragging: true);
-                HapticFeedback.selectionClick();
-                widget.onChangeStart(value);
-                widget.onChanged(value);
-              },
-              onVerticalDragUpdate: (details) =>
-                  widget.onChanged(fraction(details.globalPosition)),
-              onVerticalDragEnd: (_) {
-                widget.onChangeEnd(widget.currentFraction);
-                _hideLater();
-              },
-              onVerticalDragCancel: _hideLater,
-              child: SizedBox(
-                width: 48,
-                child: AnimatedOpacity(
-                  key: const ValueKey<String>(
-                    'reader-fast-scrubber-visibility',
-                  ),
-                  opacity: _visible ? 1 : 0,
-                  duration: const Duration(milliseconds: 150),
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: <Widget>[
-                      Positioned(
-                        right: 9,
-                        top: 0,
-                        bottom: 0,
-                        child: Container(
-                          key: const ValueKey<String>(
-                            'reader-fast-scrubber-track',
-                          ),
-                          width: 3,
-                          decoration: BoxDecoration(
-                            color: widget.night
-                                ? Colors.white30
-                                : ShelfColors.blue.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        right: 3,
-                        top:
-                            (constraints.maxHeight - 28) *
-                            widget.currentFraction.clamp(0, 1),
-                        child: Container(
-                          key: const ValueKey<String>(
-                            'reader-fast-scrubber-thumb',
-                          ),
-                          width: 15,
-                          height: 28,
-                          decoration: BoxDecoration(
-                            color: widget.night
-                                ? const Color(0xFF78ADE5)
-                                : ShelfColors.blue,
-                            borderRadius: BorderRadius.circular(8),
-                            boxShadow: const <BoxShadow>[
-                              BoxShadow(color: Colors.black45, blurRadius: 5),
-                            ],
-                          ),
-                        ),
-                      ),
-                      if (_dragging)
+            child: IgnorePointer(
+              ignoring: !widget.enabled,
+              child: GestureDetector(
+                key: const ValueKey<String>('reader-fast-scrubber'),
+                behavior: HitTestBehavior.opaque,
+                onTapDown: (details) {
+                  final value = fraction(details.globalPosition);
+                  _reveal();
+                  widget.onChangeStart(value);
+                  widget.onChanged(value);
+                },
+                onTapUp: (details) {
+                  widget.onChangeEnd(fraction(details.globalPosition));
+                  _hideLater();
+                },
+                onTapCancel: _hideLater,
+                onVerticalDragStart: (details) {
+                  final value = fraction(details.globalPosition);
+                  _reveal(dragging: true);
+                  HapticFeedback.selectionClick();
+                  widget.onChangeStart(value);
+                  widget.onChanged(value);
+                },
+                onVerticalDragUpdate: (details) =>
+                    widget.onChanged(fraction(details.globalPosition)),
+                onVerticalDragEnd: (_) {
+                  widget.onChangeEnd(widget.currentFraction);
+                  _hideLater();
+                },
+                onVerticalDragCancel: _hideLater,
+                child: SizedBox(
+                  width: _hitWidth,
+                  child: AnimatedOpacity(
+                    key: const ValueKey<String>(
+                      'reader-fast-scrubber-visibility',
+                    ),
+                    opacity: _visible ? 1 : 0,
+                    duration: const Duration(milliseconds: 150),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: <Widget>[
                         Positioned(
-                          right: 27,
-                          top:
-                              ((constraints.maxHeight - 42) *
-                                      widget.currentFraction.clamp(0, 1))
-                                  .clamp(0, constraints.maxHeight - 42),
+                          right: 9,
+                          top: 0,
+                          bottom: 0,
                           child: Container(
                             key: const ValueKey<String>(
-                              'reader-fast-scrubber-label',
+                              'reader-fast-scrubber-track',
                             ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 6,
-                            ),
+                            width: 3,
                             decoration: BoxDecoration(
                               color: widget.night
-                                  ? const Color(0xE6111418)
-                                  : Colors.white,
-                              borderRadius: BorderRadius.circular(9),
-                              border: widget.night
-                                  ? null
-                                  : Border.all(color: ShelfColors.line),
-                              boxShadow: widget.night
-                                  ? const <BoxShadow>[]
-                                  : const <BoxShadow>[
-                                      BoxShadow(
-                                        color: Color(0x14173A63),
-                                        blurRadius: 14,
-                                        offset: Offset(0, 4),
-                                      ),
-                                    ],
+                                  ? Colors.white30
+                                  : ShelfColors.blue.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(3),
                             ),
-                            child: Text(
-                              '${widget.currentPage} / ${widget.totalPages}',
-                              style: TextStyle(
+                          ),
+                        ),
+                        Positioned(
+                          right: 3,
+                          top:
+                              (constraints.maxHeight - 28) *
+                              widget.currentFraction.clamp(0, 1),
+                          child: Container(
+                            key: const ValueKey<String>(
+                              'reader-fast-scrubber-thumb',
+                            ),
+                            width: 15,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              color: widget.night
+                                  ? const Color(0xFF78ADE5)
+                                  : ShelfColors.blue,
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: const <BoxShadow>[
+                                BoxShadow(color: Colors.black45, blurRadius: 5),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (_dragging)
+                          Positioned(
+                            right: 27,
+                            top:
+                                ((constraints.maxHeight - 42) *
+                                        widget.currentFraction.clamp(0, 1))
+                                    .clamp(0, constraints.maxHeight - 42),
+                            child: Container(
+                              key: const ValueKey<String>(
+                                'reader-fast-scrubber-label',
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
                                 color: widget.night
-                                    ? Colors.white
-                                    : ShelfColors.blue,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 12,
+                                    ? const Color(0xE6111418)
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(9),
+                                border: widget.night
+                                    ? null
+                                    : Border.all(color: ShelfColors.line),
+                                boxShadow: widget.night
+                                    ? const <BoxShadow>[]
+                                    : const <BoxShadow>[
+                                        BoxShadow(
+                                          color: Color(0x14173A63),
+                                          blurRadius: 14,
+                                          offset: Offset(0, 4),
+                                        ),
+                                      ],
+                              ),
+                              child: Text(
+                                '${widget.currentPage} / ${widget.totalPages}',
+                                style: TextStyle(
+                                  color: widget.night
+                                      ? Colors.white
+                                      : ShelfColors.blue,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
