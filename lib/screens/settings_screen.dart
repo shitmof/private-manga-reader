@@ -23,9 +23,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _refreshStats() =>
       setState(() => _stats = widget.controller.loadStats());
 
+  /// 统一的偏好读取入口。
+  ///
+  /// 不要缓存 `build` 里拿到的 preferences：设置页是 push 出来的独立路由，
+  /// 不订阅 controller，所以页面不会因为偏好变化而重建。
+  /// 若回调闭包捕获了进入页面时的那份 preferences，
+  /// 连续改两个开关时，第二次会用旧快照覆盖掉第一次的结果。
+  ReaderPreferences get _preferences => widget.controller.preferences;
+
+  /// 基于**最新**偏好做一次修改，并立即刷新 UI。
+  ///
+  /// [mutate] 在最新快照上调用，因此连点多个开关不会互相覆盖。
+  /// `updatePreferences` 会先同步更新内存里的 preferences（随后才异步落盘），
+  /// 所以这里在调用后同步重建即可拿到新状态——
+  /// **不能**把 setState 放在 await 之后：落盘是磁盘 IO，
+  /// 一旦它慢或未完成，界面就会停留在旧状态（用户反馈的正是这个现象）。
+  Future<void> _updatePreferences(
+    ReaderPreferences Function(ReaderPreferences current) mutate,
+  ) async {
+    final pending = widget.controller.updatePreferences(mutate(_preferences));
+    if (mounted) setState(() {});
+    await pending;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final preferences = widget.controller.preferences;
+    final preferences = _preferences;
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
       body: ListView(
@@ -60,12 +83,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ],
                       selected: <ReaderSurfaceMode>{preferences.surfaceMode},
-                      onSelectionChanged: (selection) async {
-                        await widget.controller.updatePreferences(
-                          preferences.copyWith(surfaceMode: selection.first),
-                        );
-                        if (mounted) setState(() {});
-                      },
+                      onSelectionChanged: (selection) => _updatePreferences(
+                        (current) =>
+                            current.copyWith(surfaceMode: selection.first),
+                      ),
                     ),
                   ),
                 ),
@@ -87,8 +108,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ShelfSwitchTile(
                   title: '显示阅读页码',
                   value: preferences.showPageNumber,
-                  onChanged: (value) => widget.controller.updatePreferences(
-                    preferences.copyWith(showPageNumber: value),
+                  onChanged: (value) => _updatePreferences(
+                    (current) => current.copyWith(showPageNumber: value),
                   ),
                 ),
                 const Divider(height: 1, indent: 16),
@@ -96,8 +117,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: '记住阅读位置',
                   subtitle: '再次打开时回到上次位置',
                   value: preferences.rememberProgress,
-                  onChanged: (value) => widget.controller.updatePreferences(
-                    preferences.copyWith(rememberProgress: value),
+                  onChanged: (value) => _updatePreferences(
+                    (current) => current.copyWith(rememberProgress: value),
                   ),
                 ),
                 const Divider(height: 1, indent: 16),
@@ -105,8 +126,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: '跟随手机亮度',
                   subtitle: '开启后不再使用应用内亮度，随手机亮度变化',
                   value: preferences.followSystemBrightness,
-                  onChanged: (value) => widget.controller.updatePreferences(
-                    preferences.copyWith(followSystemBrightness: value),
+                  onChanged: (value) => _updatePreferences(
+                    (current) =>
+                        current.copyWith(followSystemBrightness: value),
                   ),
                 ),
                 const Divider(height: 1, indent: 16),
@@ -114,8 +136,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: '阅读器快速定位条',
                   subtitle: '关闭后右侧定位条不响应触摸，避免翻页误触跳页',
                   value: preferences.readerScrubber,
-                  onChanged: (value) => widget.controller.updatePreferences(
-                    preferences.copyWith(readerScrubber: value),
+                  onChanged: (value) => _updatePreferences(
+                    (current) => current.copyWith(readerScrubber: value),
                   ),
                 ),
               ],
@@ -146,10 +168,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ],
                 selected: <AppThemePreference>{preferences.theme},
-                onSelectionChanged: (selection) =>
-                    widget.controller.updatePreferences(
-                      preferences.copyWith(theme: selection.first),
-                    ),
+                onSelectionChanged: (selection) => _updatePreferences(
+                  (current) => current.copyWith(theme: selection.first),
+                ),
               ),
             ),
           ),
@@ -304,8 +325,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ? '已开启：禁止截屏与录屏，切到后台时遮盖书架内容'
                       : '开启后整个应用禁止截屏，并在切到后台时隐藏内容',
                   value: preferences.incognito,
-                  onChanged: (value) => widget.controller.updatePreferences(
-                    preferences.copyWith(incognito: value),
+                  onChanged: (value) => _updatePreferences(
+                    (current) => current.copyWith(incognito: value),
                   ),
                 ),
                 const Divider(height: 1, indent: 16),
@@ -320,7 +341,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 24),
           const Center(
             child: Text(
-              '拾画阁 1.6.0',
+              '拾画阁 1.6.1',
               style: TextStyle(color: ShelfColors.muted, fontSize: 12),
             ),
           ),
@@ -409,8 +430,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
     if (selected == null || !mounted) return;
-    await widget.controller.updatePreferences(
-      initial.copyWith(imageGap: selected.toDouble()),
+    await _updatePreferences(
+      (current) => current.copyWith(imageGap: selected.toDouble()),
     );
   }
 

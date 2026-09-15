@@ -44,3 +44,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# 签名配置与密钥：绝不入库（入库会导致升级密钥泄露、被他人签出无法覆盖安装的包）
+/android/key.properties
+*.jks
+*.keystore

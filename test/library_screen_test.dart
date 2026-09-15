@@ -239,7 +239,15 @@ void main() {
     await tester.pump();
     await tester.runAsync(() async {
       await tester.tap(find.text('私密').last);
-      await Future<void>.delayed(const Duration(milliseconds: 500));
+      // 轮询等待落盘完成，不用固定延时：
+      // 全量并行跑测试时固定 500ms 会偶发不够，导致断言读到旧状态。
+      for (var i = 0; i < 60; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        final updated = controller.library
+            .where((item) => item.comic.id == firstId)
+            .toList();
+        if (updated.isNotEmpty && updated.first.comic.isPrivate) break;
+      }
     });
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('第一本'), findsNothing);

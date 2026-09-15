@@ -43,6 +43,13 @@ class _ReaderScreenState extends State<ReaderScreen>
   bool _scrubbing = false;
   double _scrubFraction = 0;
 
+  /// 本阅读页是否持有一次截屏保护申请。
+  ///
+  /// 必须与实际申请严格配对：阅读页只在「私密漫画」时才申请，
+  /// 但退出时无条件释放会让计数凭空减一，
+  /// 从而把无痕模式（或其他持有者）的保护一并解除。
+  bool _holdsGuard = false;
+
   @override
   void initState() {
     super.initState();
@@ -60,6 +67,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     });
     if (widget.controller.summaryFor(widget.comicId)?.comic.isPrivate ??
         false) {
+      _holdsGuard = true;
       await PrivateScreenGuard.acquireSecure();
     }
     await _applyBrightness(widget.controller.preferences.readerBrightness);
@@ -79,10 +87,26 @@ class _ReaderScreenState extends State<ReaderScreen>
     WidgetsBinding.instance.removeObserver(this);
     _scrollController.removeListener(_handleScroll);
     unawaited(_saveProgress());
-    unawaited(ScreenBrightness().resetApplicationScreenBrightness());
-    unawaited(PrivateScreenGuard.releaseSecure());
+    unawaited(_restoreSystemBrightness());
+    if (_holdsGuard) {
+      _holdsGuard = false;
+      unawaited(PrivateScreenGuard.releaseSecure());
+    }
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// 退出阅读页时交还亮度控制权。
+  ///
+  /// 必须自行吞掉异常：该平台通道在部分 ROM 或非 Android 环境下没有实现，
+  /// 而 dispose 里的 `unawaited` 位于 try/catch 之外，
+  /// 一旦抛出就会变成未处理的异步异常（测试环境下会直接判定失败）。
+  Future<void> _restoreSystemBrightness() async {
+    try {
+      await ScreenBrightness().resetApplicationScreenBrightness();
+    } catch (_) {
+      // 亮度还原是尽力而为，失败不应影响退出阅读页。
+    }
   }
 
   @override
