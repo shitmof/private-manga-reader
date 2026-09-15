@@ -42,25 +42,27 @@
 - [下载拾画阁 v1.6.1 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.6.1/shihuage-v1.6.1-android.apk)
 - 文件大小与 SHA-256：见对应 Release 说明
 - 兼容 ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`
-- 签名证书 SHA-256：`3724690E26BAE1597AD10221C10F2B2B15ADE2A5BFDBAF408834DC46EAACE1A5`
-  （与 v1.5.0 一致，可保留数据覆盖升级）
-- **注意**：v1.6.0 曾因 `ANDROID_USER_HOME` 指向不同目录而用了另一把 debug 密钥，
-  若你装的是 v1.6.0，需要先卸载一次才能装上 v1.6.1；此后版本都能正常覆盖升级。
+- **签名证书 SHA-256**：`1F6A95C4786F85D1F39DEDDBF61D0BCC56BEB2D9A59F1A3CA43AAF70B8A8391A`
+- 这是**唯一渠道**：v1.6.0 与 v1.6.1 使用同一把密钥，已装 v1.6.0 可直接覆盖升级、保留数据，无需卸载。
 
 ## 构建时的签名
 
-`android/key.properties`（**不进版本库**）用于显式指定签名密钥，避免 Gradle 因
-`ANDROID_USER_HOME` / `ANDROID_SDK_HOME` 的不同而悄悄换用另一把 debug 密钥——
-那会签出「同一台设备无法覆盖安装」的包。
+本仓库只使用**一把**签名密钥。`android/key.properties`（**不进版本库**）显式指定它，
+避免 Gradle 因 `ANDROID_USER_HOME` / `ANDROID_SDK_HOME` 指向不同目录而悄悄换用另一把
+debug 密钥——那会签出「同一台设备无法覆盖安装」的包。
 
 ```properties
-storeFile=shihuage-release.keystore
+storeFile=shihuage-v160-channel.keystore
 storePassword=android
 keyAlias=androiddebugkey
 keyPassword=android
+expectedCertSha256=1F6A95C4786F85D1F39DEDDBF61D0BCC56BEB2D9A59F1A3CA43AAF70B8A8391A
 ```
 
-- `key.properties` 里显式指定了 `storeFile` 却找不到时构建**直接失败**，不会静默回退。
+- `key.properties` 缺失、未声明 `storeFile`、或 `expectedCertSha256` 与实际指纹不符时，
+  构建**直接失败**，不会静默回退到默认密钥。
+- 只有显式传 `-PallowDebugSigning=true`（本地开发）才跳过校验。
+- 构建日志会打印实际使用的密钥路径与证书指纹。
 - 解析时会剥离 UTF-8 BOM（Windows 的 `Set-Content -Encoding UTF8` 会写入 BOM，
   BOM 会污染第一行键名使 `storeFile` 失效）。
 - 未提供 `key.properties` 时回退到 `$HOME/.android/debug.keystore`，构建日志会打印实际使用的路径。
