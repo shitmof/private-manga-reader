@@ -26,6 +26,12 @@ abstract final class ShelfColors {
   /// 边框、分隔线。
   static const line = Color(0xFFE5E9EE);
 
+  /// 空槽底色。用于分组四宫格不足四本时的占位。
+  ///
+  /// 刻意用中性淡灰而不是品牌浅蓝：浅蓝在本应用里表示“选中”，
+  /// 用在这里会让空槽看起来像被选中的封面。
+  static const emptySlot = Color(0xFFF1F3F6);
+
   /// 夜间画布。仅用于用户主动选择的夜间阅读，不作为默认。
   static const dark = Color(0xFF111418);
 }

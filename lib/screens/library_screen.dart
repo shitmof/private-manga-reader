@@ -1742,42 +1742,44 @@ class _FolderCard extends StatelessWidget {
     final previews = contents.take(4).toList();
     return InkWell(
       onTap: organizeMode ? null : onTap,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(ShelfMetrics.cardRadius),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           AspectRatio(
-            aspectRatio: 0.72,
+            aspectRatio: ShelfMetrics.coverAspect,
             child: _FolderMosaic(controller: controller, contents: previews),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: ShelfMetrics.coverToTitle),
           SizedBox(
-            height: 36,
+            height: ShelfMetrics.titleBlockHeight,
             child: Align(
               alignment: Alignment.topLeft,
               child: Text(
                 folder.name,
-                maxLines: 2,
+                maxLines: ShelfMetrics.cardTitleLines,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleSmall?.copyWith(height: 1.3),
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontSize: ShelfType.cardTitle,
+                  height: 1.3,
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: ShelfMetrics.titleToCaption),
           SizedBox(
-            height: 18,
+            height: ShelfMetrics.captionLineHeight,
             child: Row(
               children: <Widget>[
                 Expanded(
                   child: Text(
-                    contents.isEmpty ? '空书单' : '共 ${contents.length} 本',
+                    contents.isEmpty ? '空分组' : '共 ${contents.length} 本',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: ShelfColors.muted,
-                      fontSize: 11.5,
+                      fontSize: ShelfType.caption,
+                      height: 1.2,
                     ),
                   ),
                 ),
@@ -1813,8 +1815,8 @@ class _FolderMosaic extends StatelessWidget {
   const _FolderMosaic({
     required this.controller,
     required this.contents,
-    this.padding = 8,
-    this.radius = 16,
+    this.padding = ShelfMetrics.groupPadding,
+    this.radius = ShelfMetrics.cardRadius,
   });
 
   final AppController controller;
@@ -1845,8 +1847,8 @@ class _FolderMosaic extends StatelessWidget {
         padding: EdgeInsets.zero,
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 2,
-          crossAxisSpacing: 4,
-          mainAxisSpacing: 4,
+          crossAxisSpacing: ShelfMetrics.groupGap,
+          mainAxisSpacing: ShelfMetrics.groupGap,
         ),
         itemCount: 4,
         itemBuilder: (_, index) {
@@ -1855,7 +1857,7 @@ class _FolderMosaic extends StatelessWidget {
             key: ValueKey<String>('folder-mosaic-slot-$index'),
             borderRadius: BorderRadius.circular(5),
             child: preview == null
-                ? const ColoredBox(color: ShelfColors.blueSoft)
+                ? const ColoredBox(color: ShelfColors.emptySlot)
                 : preview.coverStoredPath == null
                 ? ColoredBox(
                     color: Theme.of(context).colorScheme.surface,

@@ -238,18 +238,27 @@ void main() {
     await tester.tap(find.byTooltip('批量管理'));
     await tester.tap(find.text('第一本'));
     await tester.pump();
+    var becamePrivate = false;
     await tester.runAsync(() async {
       await tester.tap(find.text('私密').last);
-      // 轮询等待落盘完成，不用固定延时：
-      // 全量并行跑测试时固定 500ms 会偶发不够，导致断言读到旧状态。
-      for (var i = 0; i < 60; i++) {
+      // 轮询等待落盘完成，不用固定延时：全量并行跑测试时磁盘写入明显更慢，
+      // 固定等待会偶发不足，导致断言读到旧状态而误报成“漫画还在”。
+      for (var i = 0; i < 400; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 50));
         final updated = controller.library
             .where((item) => item.comic.id == firstId)
             .toList();
-        if (updated.isNotEmpty && updated.first.comic.isPrivate) break;
+        if (updated.isNotEmpty && updated.first.comic.isPrivate) {
+          becamePrivate = true;
+          break;
+        }
       }
     });
+    expect(
+      becamePrivate,
+      isTrue,
+      reason: '标记私密未在等待时间内落盘，属于操作未完成，而不是“漫画仍显示”',
+    );
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('第一本'), findsNothing);
 
