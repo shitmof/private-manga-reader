@@ -711,9 +711,21 @@ class AppController extends ChangeNotifier {
     await _repository.saveProgress(comicId, position, offset);
   }
 
+  /// 偏好落盘的测试接缝：非 null 时由它决定何时真正写入。
+  ///
+  /// 有了它才能在测试里**确定性地**把写入卡住，验证「落盘未完成时界面已刷新」；
+  /// 否则只能靠固定延时碰运气，覆盖不到真机慢盘的条件。
+  @visibleForTesting
+  Future<void> Function(ReaderPreferences value)? preferencesWriteHook;
+
   Future<void> updatePreferences(ReaderPreferences value) async {
     preferences = value;
     notifyListeners();
+    final hook = preferencesWriteHook;
+    if (hook != null) {
+      await hook(value);
+      return;
+    }
     await _repository.savePreferences(value);
   }
 

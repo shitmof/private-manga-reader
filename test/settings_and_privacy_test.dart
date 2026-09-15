@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -25,6 +26,8 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 ///  3. 退出普通（非私密）漫画阅读页会错误解除全局截屏保护。
 ///
 /// 原有 57 个测试未覆盖设置页与阅读页的这些交互，因此缺陷逃逸。
+/// 用 [AppController.preferencesWriteHook] 把偏好落盘卡在闸门后面，
+/// 用于构造确定性时序；不依赖任何固定延时。
 void main() {
   sqfliteFfiInit();
 
@@ -116,6 +119,58 @@ void main() {
     });
     await tester.pump();
   }
+
+  testWidgets('设置页：落盘被阻塞时开关仍立即刷新（确定性用例）', (tester) async {
+    await useTallPhone(tester);
+
+    final (controller, _, _) = await buildController(
+      tester,
+      prefix: 'settings-blocked-write-',
+    );
+
+    // 用 Completer 当闸门把落盘卡住：断言发生在写入**仍未完成**的时刻，
+    // 不依赖任何 sleeps，因此不会像固定延时那样偶发失效。
+    final gate = Completer<void>();
+    var saveStarted = false;
+    var saveFinished = false;
+    controller.preferencesWriteHook = (value) async {
+      saveStarted = true;
+      await gate.future;
+      saveFinished = true;
+    };
+    addTearDown(() {
+      controller.preferencesWriteHook = null;
+      if (!gate.isCompleted) gate.complete();
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(home: SettingsScreen(controller: controller)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('记住阅读位置'));
+    await tester.pump();
+
+    expect(saveStarted, isTrue, reason: '应已发起落盘');
+    expect(saveFinished, isFalse, reason: '写入此刻必须仍被阻塞');
+
+    // 关键：写入未完成，界面也必须已经反映新状态。
+    expect(
+      switchValue(tester, '记住阅读位置'),
+      isFalse,
+      reason: '落盘未完成时开关也必须立即刷新，否则真机慢盘就会停在旧状态',
+    );
+    expect(controller.preferences.rememberProgress, isFalse);
+
+    // 放行写入，确认没有异常且状态保持。
+    gate.complete();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 150)),
+    );
+    await tester.pump();
+    expect(saveFinished, isTrue);
+    expect(switchValue(tester, '记住阅读位置'), isFalse);
+  });
 
   testWidgets('设置页：开关在同一页面内立即反映新状态', (tester) async {
     await useTallPhone(tester);
