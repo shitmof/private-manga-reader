@@ -22,7 +22,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 void main() {
   sqfliteFfiInit();
 
-  testWidgets('书单内系统返回回到拾画阁而不是退出应用', (tester) async {
+  testWidgets('书单内系统返回回到我的书架而不是退出应用', (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.resetPhysicalSize);
@@ -102,7 +102,8 @@ void main() {
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
 
-    expect(find.text('拾画阁'), findsOneWidget);
+    // 根书架标题按统一规范显示为“我的书架”，不再是应用名。
+    expect(find.text('我的书架'), findsOneWidget);
     expect(find.text('返回测试漫画'), findsOneWidget);
   });
 

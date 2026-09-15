@@ -341,7 +341,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 24),
           const Center(
             child: Text(
-              '拾画阁 1.6.1',
+              '拾画阁 1.6.2',
               style: TextStyle(color: ShelfColors.muted, fontSize: 12),
             ),
           ),

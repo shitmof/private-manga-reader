@@ -354,12 +354,17 @@ class _LibraryScreenState extends State<LibraryScreen>
                         Text(
                           _activeFolder?.name ??
                               _activeReadingList?.name ??
-                              '拾画阁',
+                              '我的书架',
+                          style: const TextStyle(
+                            fontSize: ShelfType.pageTitle,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.5,
+                          ),
                         ),
                         const Text(
                           '只保存在你的设备中',
                           style: TextStyle(
-                            fontSize: 11,
+                            fontSize: ShelfType.caption,
                             fontWeight: FontWeight.w500,
                             color: ShelfColors.muted,
                             letterSpacing: 0.15,
@@ -1344,9 +1349,14 @@ class _LibraryGridState extends State<_LibraryGrid> {
             radius: const Radius.circular(3),
             child: LayoutBuilder(
               builder: (context, constraints) {
+                // 小屏适当缩减留白；其余尺寸一律取自统一参数，便于全站一致。
                 final compact = constraints.maxWidth < 340;
-                final horizontalPadding = compact ? 12.0 : 16.0;
-                final crossSpacing = compact ? 10.0 : 14.0;
+                final horizontalPadding = compact
+                    ? 12.0
+                    : ShelfMetrics.pagePadding;
+                final crossSpacing = compact
+                    ? 10.0
+                    : ShelfMetrics.gridColumnGap;
                 final crossAxisCount = constraints.maxWidth >= 600
                     ? ((constraints.maxWidth -
                                   horizontalPadding * 2 +
@@ -1360,7 +1370,11 @@ class _LibraryGridState extends State<_LibraryGrid> {
                         horizontalPadding * 2 -
                         crossSpacing * (crossAxisCount - 1)) /
                     crossAxisCount;
-                final cardExtent = cardWidth / 0.72 + 69;
+                // 封面高度按 0.72 宽高比单独计算，再加上固定的文字区高度。
+                // 固定文字区保证标题只有一行时同排卡片底部依然对齐。
+                final coverHeight = cardWidth / ShelfMetrics.coverAspect;
+                final cardExtent =
+                    coverHeight + ShelfMetrics.cardTextBlockHeight;
                 return GridView.builder(
                   key: const ValueKey<String>('library-three-column-grid'),
                   controller: _scrollController,
@@ -1373,7 +1387,7 @@ class _LibraryGridState extends State<_LibraryGrid> {
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: crossAxisCount,
                     crossAxisSpacing: crossSpacing,
-                    mainAxisSpacing: 24,
+                    mainAxisSpacing: ShelfMetrics.gridRowGap,
                     mainAxisExtent: cardExtent,
                   ),
                   itemCount: entries.length,
@@ -1958,31 +1972,33 @@ class _ComicCard extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: ShelfMetrics.coverToTitle),
           SizedBox(
-            height: 36,
+            height: ShelfMetrics.titleBlockHeight,
             child: Align(
               alignment: Alignment.topLeft,
               child: Text(
                 comic.title,
-                maxLines: 2,
+                maxLines: ShelfMetrics.cardTitleLines,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleSmall?.copyWith(height: 1.3),
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontSize: ShelfType.cardTitle,
+                  height: 1.3,
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: ShelfMetrics.titleToCaption),
           SizedBox(
-            height: 18,
+            height: ShelfMetrics.captionLineHeight,
             child: Text(
               '${summary.itemCount} 张 · ${formatBytes(summary.totalBytes)}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: ShelfColors.muted,
-                fontSize: 11.5,
+                fontSize: ShelfType.caption,
+                height: 1.2,
               ),
             ),
           ),
