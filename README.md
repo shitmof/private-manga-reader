@@ -39,11 +39,31 @@
 
 ## 下载 Android 安装包
 
-- [下载拾画阁 v1.6.0 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.6.0/shihuage-v1.6.0-android.apk)
+- [下载拾画阁 v1.6.1 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.6.1/shihuage-v1.6.1-android.apk)
 - 文件大小与 SHA-256：见对应 Release 说明
 - 兼容 ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`
-- **注意**：该 APK 使用调试密钥签名，安装到已装发布密钥版本的手机会报签名不匹配，
-  需要先卸载旧版本。
+- 签名证书 SHA-256：`3724690E26BAE1597AD10221C10F2B2B15ADE2A5BFDBAF408834DC46EAACE1A5`
+  （与 v1.5.0 一致，可保留数据覆盖升级）
+- **注意**：v1.6.0 曾因 `ANDROID_USER_HOME` 指向不同目录而用了另一把 debug 密钥，
+  若你装的是 v1.6.0，需要先卸载一次才能装上 v1.6.1；此后版本都能正常覆盖升级。
+
+## 构建时的签名
+
+`android/key.properties`（**不进版本库**）用于显式指定签名密钥，避免 Gradle 因
+`ANDROID_USER_HOME` / `ANDROID_SDK_HOME` 的不同而悄悄换用另一把 debug 密钥——
+那会签出「同一台设备无法覆盖安装」的包。
+
+```properties
+storeFile=shihuage-release.keystore
+storePassword=android
+keyAlias=androiddebugkey
+keyPassword=android
+```
+
+- `key.properties` 里显式指定了 `storeFile` 却找不到时构建**直接失败**，不会静默回退。
+- 解析时会剥离 UTF-8 BOM（Windows 的 `Set-Content -Encoding UTF8` 会写入 BOM，
+  BOM 会污染第一行键名使 `storeFile` 失效）。
+- 未提供 `key.properties` 时回退到 `$HOME/.android/debug.keystore`，构建日志会打印实际使用的路径。
 
 仓库与 Release 已公开，无需登录即可下载。仓库当前未附加开源许可证，默认保留所有权利；公开不代表自动授权复制、修改或再分发。
 
