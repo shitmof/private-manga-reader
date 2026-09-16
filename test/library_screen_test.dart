@@ -259,11 +259,13 @@ void main() {
       isTrue,
       reason: '标记私密未在等待时间内落盘，属于操作未完成，而不是“漫画仍显示”',
     );
-    await tester.pump(const Duration(milliseconds: 300));
+    // 必须等切换动画走完再断言：书架用 AnimatedSwitcher 承载作用域内容，
+    // 过渡期间会同时保留新旧子树，此时仍能找到正在淡出的旧卡片。
+    await tester.pumpAndSettle();
     expect(find.text('第一本'), findsNothing);
 
     await tester.tap(find.text('私密').first);
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
     expect(find.text('第一本'), findsOneWidget);
     expect(
       controller.library
@@ -353,8 +355,12 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
 
-    expect(find.text('合成书单'), findsNWidgets(2));
-    expect(find.text('是否将《拖动来源》和《合组目标》合成一个书单？'), findsOneWidget);
+    // 前台统一用“分组”表示拖动形成的容器；标题与确认按钮同文案。
+    expect(find.text('新建分组'), findsNWidgets(2));
+    expect(
+      find.text('是否将《拖动来源》和《合组目标》放入一个分组？'),
+      findsOneWidget,
+    );
     expect(
       find.byKey(const ValueKey<String>('shelf-group-composer-sheet')),
       findsOneWidget,
@@ -376,7 +382,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 700));
     await confirmGesture.up();
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '合成书单'));
+    await tester.tap(find.widgetWithText(FilledButton, '创建分组'));
     await tester.pumpAndSettle();
     for (var attempt = 0; attempt < 40; attempt++) {
       if (controller.folders.isNotEmpty &&
@@ -396,8 +402,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(controller.folders, hasLength(1));
-    expect(controller.folders.single.name, '新建书单');
-    expect(find.text('新建书单'), findsOneWidget);
+    // 分组面板的默认名称随术语统一改为“新建分组”。
+    expect(controller.folders.single.name, '新建分组');
+    expect(find.text('新建分组'), findsOneWidget);
     for (var index = 0; index < 4; index++) {
       expect(
         find.byKey(ValueKey<String>('folder-mosaic-slot-$index')),

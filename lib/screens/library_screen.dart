@@ -10,6 +10,7 @@ import '../widgets/formatters.dart';
 import '../widgets/import_flow.dart';
 import '../widgets/private_image.dart';
 import '../widgets/shelf_interactive.dart';
+import '../widgets/shelf_name_dialog.dart';
 import 'comic_detail_screen.dart';
 import 'editor_screen.dart';
 import 'network_sources_screen.dart';
@@ -658,8 +659,9 @@ class _LibraryScreenState extends State<LibraryScreen>
               onTap: () => Navigator.pop(context, 'privacy'),
             ),
             ListTile(
-              leading: const Icon(Icons.delete_outline_rounded),
-              title: const Text('删除文件夹（保留漫画）'),
+              leading: const Icon(Icons.folder_off_outlined),
+              title: const Text('解散分组'),
+              subtitle: const Text('分组内的漫画回到书架，不会被删除'),
               onTap: () => Navigator.pop(context, 'delete'),
             ),
           ],
@@ -676,34 +678,13 @@ class _LibraryScreenState extends State<LibraryScreen>
     }
   }
 
-  Future<String?> _askName(String title, {String initial = ''}) async {
-    final textController = TextEditingController(text: initial);
-    return showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: textController,
-          autofocus: true,
-          maxLength: 40,
-          decoration: const InputDecoration(hintText: '输入名称'),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final value = textController.text.trim();
-              if (value.isNotEmpty) Navigator.pop(context, value);
-            },
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-  }
+  Future<String?> _askName(String title, {String initial = ''}) =>
+      showShelfNameDialog(
+        context,
+        title: title,
+        initial: initial,
+        hintText: '输入名称',
+      );
 
   Future<void> _moveSelectionToFolder() async {
     final folderId = await showModalBottomSheet<String>(
@@ -1019,8 +1000,12 @@ class _ShelfGroupComposerSheet extends StatefulWidget {
 
 class _ShelfGroupComposerSheetState extends State<_ShelfGroupComposerSheet> {
   late final TextEditingController _nameController = TextEditingController(
-    text: '新建书单',
+    text: '新建分组',
   );
+
+  /// 名称为空时的内联错误。规范 4.3 要求错误显示在输入框附近，
+  /// 原先这里直接 return，用户点了「创建分组」没有任何反应。
+  String? _nameError;
 
   @override
   void initState() {
@@ -1039,7 +1024,10 @@ class _ShelfGroupComposerSheetState extends State<_ShelfGroupComposerSheet> {
 
   void _submit() {
     final name = _nameController.text.trim();
-    if (name.isEmpty) return;
+    if (name.isEmpty) {
+      setState(() => _nameError = '分组名称不能为空');
+      return;
+    }
     Navigator.pop(context, name);
   }
 
@@ -1072,10 +1060,10 @@ class _ShelfGroupComposerSheetState extends State<_ShelfGroupComposerSheet> {
                   ),
                 ),
                 const SizedBox(height: 18),
-                Text('合成书单', style: Theme.of(context).textTheme.titleLarge),
+                Text('新建分组', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 6),
                 Text(
-                  '是否将《${widget.source.comic.title}》和《${widget.target.comic.title}》合成一个书单？',
+                  '是否将《${widget.source.comic.title}》和《${widget.target.comic.title}》放入一个分组？',
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: ShelfColors.muted),
                 ),
@@ -1100,7 +1088,15 @@ class _ShelfGroupComposerSheetState extends State<_ShelfGroupComposerSheet> {
                   maxLength: 40,
                   textInputAction: TextInputAction.done,
                   onSubmitted: (_) => _submit(),
-                  decoration: const InputDecoration(labelText: '书单名称'),
+                  onChanged: (_) {
+                    if (_nameError != null) {
+                      setState(() => _nameError = null);
+                    }
+                  },
+                  decoration: InputDecoration(
+                    labelText: '分组名称',
+                    errorText: _nameError,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Row(
@@ -1114,8 +1110,11 @@ class _ShelfGroupComposerSheetState extends State<_ShelfGroupComposerSheet> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: FilledButton(
+                        key: const ValueKey<String>(
+                          'shelf-group-composer-confirm',
+                        ),
                         onPressed: _submit,
-                        child: const Text('合成书单'),
+                        child: const Text('创建分组'),
                       ),
                     ),
                   ],
