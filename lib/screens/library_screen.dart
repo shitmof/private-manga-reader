@@ -1586,6 +1586,14 @@ class _ShelfDropTargetState extends State<_ShelfDropTarget> {
   _ShelfDropIntent _intent = _ShelfDropIntent.none;
   bool _armed = false;
 
+  /// 是否显示插入位置指示。
+  ///
+  /// 规范 4.2 要求「拖到卡片边缘表示插入排序，并显示插入位置」，
+  /// 原先 reorder 是默认意图却没有任何视觉反馈，用户无法预判落点。
+  /// 这里只用布尔状态配合 AnimatedOpacity，不引入 AnimationController，
+  /// 避免 ticker 在 widget 停用后仍回调导致的生命周期问题。
+  bool _showInsertIndicator = false;
+
   @override
   void dispose() {
     _armTimer?.cancel();
@@ -1619,9 +1627,13 @@ class _ShelfDropTargetState extends State<_ShelfDropTarget> {
 
   void _updateIntent(DragTargetDetails<_ShelfDragData> details) {
     final next = _intentFor(details);
-    if (next == _intent) return;
+    if (next == _intent && _showInsertIndicator == (next == _ShelfDropIntent.reorder)) {
+      return;
+    }
     _armTimer?.cancel();
     _armed = next == _ShelfDropIntent.reorder;
+    // 插入位置指示只在「会插入排序」时出现。
+    _showInsertIndicator = next == _ShelfDropIntent.reorder;
     setState(() => _intent = next);
     if (next == _ShelfDropIntent.createGroup ||
         next == _ShelfDropIntent.addToGroup) {
@@ -1640,6 +1652,7 @@ class _ShelfDropTargetState extends State<_ShelfDropTarget> {
     setState(() {
       _intent = _ShelfDropIntent.none;
       _armed = false;
+      _showInsertIndicator = false;
     });
   }
 
@@ -1682,14 +1695,34 @@ class _ShelfDropTargetState extends State<_ShelfDropTarget> {
             : grouping
             ? (_armed ? 1.025 : 1.015)
             : 1,
+        // 规范 6：卡片让位约 220ms；系统关闭动画时降级为短过渡。
         duration: MediaQuery.disableAnimationsOf(context)
             ? const Duration(milliseconds: 80)
-            : const Duration(milliseconds: 180),
+            : const Duration(milliseconds: 220),
         curve: Curves.easeOutCubic,
         child: Stack(
           fit: StackFit.expand,
           children: <Widget>[
             widget.child,
+            // 插入位置指示：目标卡片左侧的蓝色竖线。
+            IgnorePointer(
+              child: AnimatedOpacity(
+                opacity: _showInsertIndicator ? 1 : 0,
+                duration: const Duration(milliseconds: 140),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    key: const ValueKey<String>('shelf-insert-indicator'),
+                    width: 3,
+                    margin: const EdgeInsets.symmetric(vertical: 6),
+                    decoration: BoxDecoration(
+                      color: ShelfColors.blue,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+              ),
+            ),
             if (candidates.isNotEmpty && grouping)
               IgnorePointer(
                 child: AnimatedContainer(
