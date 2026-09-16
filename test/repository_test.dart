@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -792,6 +792,78 @@ void main() {
         await selection.dispose();
       }
     }
+  });
+
+  test('外层 ZIP 内套 CBZ 时按内层包逐本建册', () async {
+    final archiveImporter = ArchiveImportService(repository, storage, importer);
+    final sandbox = await Directory.systemTemp.createTemp('nested-archive-');
+
+    // 构造与用户实际文件一致的结构：
+    // 外层 zip → 一个中文目录 → 多个「连载_第N话_xxxxxx.cbz」。
+    Uint8List buildInnerCbz(int chapter) {
+      final inner = legacy_archive.Archive();
+      for (final name in <String>['001.png', '002.png']) {
+        final image = img.Image(width: 8, height: 12);
+        img.fill(image, color: img.ColorRgb8(10 * chapter, 20, 30));
+        final bytes = img.encodePng(image);
+        inner.addFile(legacy_archive.ArchiveFile.bytes(name, bytes));
+      }
+      return Uint8List.fromList(legacy_archive.ZipEncoder().encode(inner));
+    }
+
+    final outer = legacy_archive.Archive();
+    final folder = '神探夏洛克：召唤死亡的暗号';
+    outer.addFile(
+      legacy_archive.ArchiveFile.bytes('$folder/连载_第1话 （2P）_aaaaaa.cbz', buildInnerCbz(1)),
+    );
+    outer.addFile(
+      legacy_archive.ArchiveFile.bytes('$folder/连载_第2话 （2P）_bbbbbb.cbz', buildInnerCbz(2)),
+    );
+    final outerFile = File(p.join(sandbox.path, 'nested.zip'));
+    await outerFile.writeAsBytes(legacy_archive.ZipEncoder().encode(outer));
+
+    final selection = await archiveImporter.prepareArchives(<PlatformFile>[
+      _TestPlatformFile(outerFile),
+    ]);
+    try {
+      // 原先只扫最外层，会因为找不到图片直接判定整个包无内容。
+      expect(
+        selection.archives, hasLength(2),
+        reason: '两个内层 cbz 应各自建册',
+      );
+      expect(selection.totalPages, 4);
+      expect(
+        selection.archives.map((a) => a.title).toList(),
+        containsAll(<String>['连载_第1话 （2P）_aaaaaa', '连载_第2话 （2P）_bbbbbb']),
+      );
+    } finally {
+      await selection.dispose();
+      if (await sandbox.exists()) await sandbox.delete(recursive: true);
+    }
+  });
+
+  test('ZIP 内既无图片也无内层包时才判定为空包', () async {
+    final archiveImporter = ArchiveImportService(repository, storage, importer);
+    final sandbox = await Directory.systemTemp.createTemp('empty-archive-');
+
+    final outer = legacy_archive.Archive();
+    outer.addFile(legacy_archive.ArchiveFile.bytes('readme.txt', utf8.encode('nothing')));
+    final outerFile = File(p.join(sandbox.path, 'empty.zip'));
+    await outerFile.writeAsBytes(legacy_archive.ZipEncoder().encode(outer));
+
+    await expectLater(
+      archiveImporter.prepareArchives(<PlatformFile>[
+        _TestPlatformFile(outerFile),
+      ]),
+      throwsA(
+        isA<FormatException>().having(
+          (e) => e.message,
+          'message',
+          contains('没有可导入的图片'),
+        ),
+      ),
+    );
+    if (await sandbox.exists()) await sandbox.delete(recursive: true);
   });
 
   test('v3 网络书库只保存索引、缓存状态与本地阅读进度', () async {

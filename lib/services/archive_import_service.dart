@@ -44,6 +44,30 @@ class ArchiveImportService {
     'heic',
     'heif',
   };
+
+  /// 内层压缩包扩展名。
+  ///
+  /// 用户常见做法是把多话漫画打成一个外层 zip，里面每话一个 cbz。
+  /// 原先只扫描直接条目里的图片，遇到这种包会直接判定「没有可导入的图片」。
+  static const _nestedArchiveExtensions = <String>{
+    'cbz',
+    'zip',
+    'cbr',
+    'rar',
+    'cb7',
+    '7z',
+    'cbt',
+    'tar',
+  };
+
+  /// 内层压缩包最多展开到第几层（顶层记为第 1 层）。
+  ///
+  /// 设上限是为了防止构造出的自引用或超深压缩包导致无限展开。
+  static const _maxNestedDepth = 3;
+
+  /// 单次导入允许展开的内层压缩包总数上限。
+  static const _maxNestedArchives = 500;
+
   static const _maxEntries = 10000;
   static const _maxEntryBytes = 512 * 1024 * 1024;
   static const _maxContainerBytes = 2 * 1024 * 1024 * 1024;
@@ -69,78 +93,219 @@ class ArchiveImportService {
     }
     await _storage.temporaryDirectory.create(recursive: true);
     final prepared = <PreparedArchive>[];
+    final errors = <String>[];
     try {
       for (var index = 0; index < sources.length; index++) {
         final source = sources[index];
         final localFile = await _copyToTemporary(source);
         Archive? archive;
+        final ownedFiles = <File>[localFile];
+        Object? failure;
         try {
           archive = await _open(localFile.path);
-          if (archive.entries.any((entry) => entry.pathEscapedRoot)) {
-            throw const FormatException('压缩包包含越界路径，已拒绝导入');
-          }
-          final archiveImages = archive.entries
-              .where((entry) => entry.isFile && _isImagePath(entry.path))
-              .where((entry) => !_isIgnoredPath(entry.path))
-              .toList(growable: false);
-          if (archiveImages.isEmpty) {
-            throw const FormatException('压缩包中没有可导入的图片');
-          }
-          if (archiveImages.any((entry) => entry.isEncrypted)) {
-            throw const FormatException('压缩包已加密，请先解除密码后导入');
-          }
-          final decodedBytes = archiveImages.fold<int>(
-            0,
-            (total, entry) => total + entry.uncompressedSize,
+          final outcome = await _scanArchive(
+            archive: archive,
+            file: localFile,
+            displayName: source.name,
+            sourceIndex: index,
+            depth: 1,
+            ownedFiles: ownedFiles,
+            overflowErrors: errors,
           );
-          if (decodedBytes > _maxTotalDecodedBytes) {
-            throw const FormatException('解压后数据过大，已停止导入');
+          prepared.addAll(outcome.archives);
+          // 本次产生的临时文件由产出的每本漫画共同持有，导入结束后统一删除。
+          for (final item in outcome.archives) {
+            item.ownedFiles.addAll(ownedFiles);
           }
-
-          final metadata = await _readComicInfo(archive, archiveImages);
-          final ordered = _orderImages(archiveImages, metadata.pageIndices);
-          final coverPath = metadata.coverArchiveIndex == null
-              ? null
-              : archiveImages
-                    .elementAtOrNull(metadata.coverArchiveIndex!)
-                    ?.path;
-          prepared.add(
-            PreparedArchive(
-              sourceIndex: index,
-              displayName: source.name,
-              localFile: localFile,
-              format: archive.format.name,
-              title: metadata.title ?? _titleFromName(source.name),
-              pages: ordered
-                  .map(
-                    (entry) => PreparedArchivePage(
-                      path: entry.path,
-                      uncompressedBytes: entry.uncompressedSize,
-                    ),
-                  )
-                  .toList(growable: false),
-              coverPageIndex: coverPath == null
-                  ? 0
-                  : ordered.indexWhere((entry) => entry.path == coverPath),
-              decodedBytes: decodedBytes,
-            ),
-          );
         } catch (error) {
-          if (await localFile.exists()) await localFile.delete();
-          throw FormatException(
-            '${source.name}：${_friendlyArchiveError(error)}',
-          );
+          failure = error;
         } finally {
           await archive?.close();
         }
+        if (failure != null) {
+          // 必须等归档关闭后再删临时文件：Windows 上被占用的文件删不掉，
+          // 在 catch 里直接删会抛 PathAccessException 并掩盖真正的失败原因。
+          for (final file in ownedFiles) {
+            try {
+              if (await file.exists()) await file.delete();
+            } on FileSystemException {
+              // 清理失败不应掩盖导入失败本身。
+            }
+          }
+          throw FormatException(
+            '${source.name}：${_friendlyArchiveError(failure)}',
+          );
+        }
       }
-      return PreparedArchiveSelection(prepared);
+      return PreparedArchiveSelection(prepared, errors: errors);
     } catch (_) {
       for (final archive in prepared) {
-        if (await archive.localFile.exists()) await archive.localFile.delete();
+        for (final file in archive.ownedFiles) {
+          try {
+            if (await file.exists()) await file.delete();
+          } on FileSystemException {
+            // 清理失败不应掩盖导入失败本身。
+          }
+        }
       }
       rethrow;
     }
+  }
+
+  /// 判断某个条目是否是内层压缩包。
+  static bool _isNestedArchivePath(String path) {
+    final extension = p.posix
+        .extension(path)
+        .replaceFirst('.', '')
+        .toLowerCase();
+    return _nestedArchiveExtensions.contains(extension);
+  }
+
+  /// 扫描一个已打开的压缩包。
+  ///
+  /// 若它直接包含图片，就产出一本漫画；若只包含内层压缩包，
+  /// 就把每个内层包解出来递归扫描（用户常见的「外层 zip 套多话 cbz」）。
+  /// [ownedFiles] 收集本次扫描过程中产生的所有临时文件，供失败时统一清理。
+  Future<_ScanOutcome> _scanArchive({
+    required Archive archive,
+    required File file,
+    required String displayName,
+    required int sourceIndex,
+    required int depth,
+    required List<File> ownedFiles,
+    required List<String> overflowErrors,
+  }) async {
+    if (archive.entries.any((entry) => entry.pathEscapedRoot)) {
+      throw const FormatException('压缩包包含越界路径，已拒绝导入');
+    }
+
+    final archiveImages = archive.entries
+        .where((entry) => entry.isFile && _isImagePath(entry.path))
+        .where((entry) => !_isIgnoredPath(entry.path))
+        .toList(growable: false);
+
+    if (archiveImages.isNotEmpty) {
+      if (archiveImages.any((entry) => entry.isEncrypted)) {
+        throw const FormatException('压缩包已加密，请先解除密码后导入');
+      }
+      final decodedBytes = archiveImages.fold<int>(
+        0,
+        (total, entry) => total + entry.uncompressedSize,
+      );
+      if (decodedBytes > _maxTotalDecodedBytes) {
+        throw const FormatException('解压后数据过大，已停止导入');
+      }
+      final metadata = await _readComicInfo(archive, archiveImages);
+      final ordered = _orderImages(archiveImages, metadata.pageIndices);
+      final coverPath = metadata.coverArchiveIndex == null
+          ? null
+          : archiveImages
+                .elementAtOrNull(metadata.coverArchiveIndex!)
+                ?.path;
+      return _ScanOutcome(<PreparedArchive>[
+        PreparedArchive(
+          sourceIndex: sourceIndex,
+          displayName: displayName,
+          localFile: file,
+          format: archive.format.name,
+          title: metadata.title ?? _titleFromName(displayName),
+          pages: ordered
+              .map(
+                (entry) => PreparedArchivePage(
+                  path: entry.path,
+                  uncompressedBytes: entry.uncompressedSize,
+                ),
+              )
+              .toList(growable: false),
+          coverPageIndex: coverPath == null
+              ? 0
+              : ordered.indexWhere((entry) => entry.path == coverPath),
+          decodedBytes: decodedBytes,
+        ),
+      ]);
+    }
+
+    // 没有直接图片：尝试把内层压缩包解出来继续扫。
+    final nested = archive.entries
+        .where((entry) => entry.isFile && _isNestedArchivePath(entry.path))
+        .where((entry) => !_isIgnoredPath(entry.path))
+        .toList(growable: false);
+    if (nested.isEmpty) {
+      // 既没有图片也没有内层压缩包，才算真正的空包；
+      // 不再像原先那样「只扫最外层就宣布整个压缩包无内容」。
+      throw const FormatException('压缩包中没有可导入的图片，也没有内层压缩包');
+    }
+    if (depth >= _maxNestedDepth) {
+      throw FormatException('内层压缩包嵌套超过 $_maxNestedDepth 层，已停止导入');
+    }
+
+    final results = <PreparedArchive>[];
+    for (final entry in nested) {
+      if (results.length >= _maxNestedArchives) {
+        overflowErrors.add(
+          '${p.posix.basename(entry.path)}：内层压缩包数量超过 $_maxNestedArchives，已跳过',
+        );
+        break;
+      }
+      final nestedFile = await _extractNestedArchive(archive, entry);
+      ownedFiles.add(nestedFile);
+      Archive? nestedArchive;
+      try {
+        nestedArchive = await _open(nestedFile.path);
+        final outcome = await _scanArchive(
+          archive: nestedArchive,
+          file: nestedFile,
+          displayName: p.posix.basename(entry.path),
+          sourceIndex: sourceIndex,
+          depth: depth + 1,
+          ownedFiles: ownedFiles,
+          overflowErrors: overflowErrors,
+        );
+        results.addAll(outcome.archives);
+      } catch (error) {
+        // 单个内层包失败不影响其余内层包，失败原因一并上报。
+        overflowErrors.add(
+          '${p.posix.basename(entry.path)}：${_friendlyArchiveError(error)}',
+        );
+      } finally {
+        await nestedArchive?.close();
+      }
+    }
+    if (results.isEmpty) {
+      throw FormatException(
+        overflowErrors.isEmpty ? '压缩包中没有可导入的图片' : overflowErrors.join('；'),
+      );
+    }
+    return _ScanOutcome(results);
+  }
+
+  /// 把内层压缩包以流式方式解到临时文件。
+  ///
+  /// 刻意逐块写入而不是一次性读入内存：内层包可能有数百 MB，
+  /// 而 KonI 打开压缩包需要可随机读取的文件源。
+  Future<File> _extractNestedArchive(Archive archive, ArchiveEntry entry) async {
+    final extension = p.posix.extension(entry.path).toLowerCase();
+    final target = File(
+      p.join(
+        _storage.temporaryDirectory.path,
+        'nested-${_uuid.v4()}${RegExp(r'^\.[a-z0-9]{1,5}$').hasMatch(extension) ? extension : '.bin'}',
+      ),
+    );
+    final sink = target.openWrite();
+    var written = 0;
+    try {
+      await for (final chunk in archive.openRead(entry)) {
+        written += chunk.length;
+        if (written > _maxEntryBytes) {
+          throw const FormatException('内层压缩包过大，已停止导入');
+        }
+        sink.add(chunk);
+      }
+      await sink.flush();
+    } finally {
+      await sink.close();
+    }
+    return target;
   }
 
   Future<ImportReport> importPrepared({
@@ -505,9 +670,12 @@ class ArchiveImportService {
 }
 
 class PreparedArchiveSelection {
-  const PreparedArchiveSelection(this.archives);
+  const PreparedArchiveSelection(this.archives, {this.errors = const <String>[]});
 
   final List<PreparedArchive> archives;
+
+  /// 部分内层压缩包未能导入的原因，逐项上报而不是只显示「失败」。
+  final List<String> errors;
 
   int get totalPages =>
       archives.fold(0, (total, item) => total + item.pages.length);
@@ -519,14 +687,22 @@ class PreparedArchiveSelection {
       archives.isEmpty ? '未命名漫画' : archives.first.title;
 
   Future<void> dispose() async {
+    final seen = <String>{};
     for (final archive in archives) {
-      if (await archive.localFile.exists()) await archive.localFile.delete();
+      for (final file in archive.ownedFiles) {
+        if (!seen.add(file.path)) continue;
+        try {
+          if (await file.exists()) await file.delete();
+        } on FileSystemException {
+          // 个别文件仍被占用时跳过，不影响其余清理。
+        }
+      }
     }
   }
 }
 
 class PreparedArchive {
-  const PreparedArchive({
+  PreparedArchive({
     required this.sourceIndex,
     required this.displayName,
     required this.localFile,
@@ -545,6 +721,19 @@ class PreparedArchive {
   final List<PreparedArchivePage> pages;
   final int coverPageIndex;
   final int decodedBytes;
+
+  /// 本漫画依赖的所有临时文件。
+  ///
+  /// 顶层压缩包副本、以及由它解出的内层压缩包副本都要在这里登记，
+  /// 否则导入结束后会在临时目录里留下大量残留。
+  final List<File> ownedFiles = <File>[];
+}
+
+/// 一次压缩包扫描的结果：要么产出一本漫画，要么产出多个内层包对应的漫画。
+class _ScanOutcome {
+  const _ScanOutcome(this.archives);
+
+  final List<PreparedArchive> archives;
 }
 
 class PreparedArchivePage {
