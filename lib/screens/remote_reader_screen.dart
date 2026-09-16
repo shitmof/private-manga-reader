@@ -11,6 +11,7 @@ import '../state/app_controller.dart';
 import '../theme.dart';
 import '../widgets/reader_edge_scrubber.dart';
 import '../widgets/reader_page_pill.dart';
+import '../widgets/reader_state_views.dart';
 import '../widgets/reader_top_bar.dart';
 
 class RemoteReaderScreen extends StatefulWidget {
@@ -330,21 +331,14 @@ class _ExternalPageImageState extends State<_ExternalPageImage> {
     future: _load,
     builder: (context, snapshot) {
       if (snapshot.hasError) {
-        return Center(
-          child: Icon(
-            Icons.broken_image_outlined,
-            size: 42,
-            color: widget.night ? Colors.white54 : ShelfColors.muted,
-          ),
+        return ReaderErrorState(
+          night: widget.night,
+          message: '这一页读取失败，可能是文件已移动或连接中断。',
         );
       }
       final bytes = snapshot.data;
       if (bytes == null) {
-        return Center(
-          child: CircularProgressIndicator(
-            color: widget.night ? Colors.white54 : ShelfColors.blue,
-          ),
-        );
+        return ReaderLoadingState(night: widget.night);
       }
       return Image.memory(
         bytes,
@@ -352,12 +346,9 @@ class _ExternalPageImageState extends State<_ExternalPageImage> {
         alignment: Alignment.topCenter,
         cacheWidth: widget.cacheWidth,
         filterQuality: FilterQuality.medium,
-        errorBuilder: (context, error, stackTrace) => Center(
-          child: Icon(
-            Icons.broken_image_outlined,
-            size: 42,
-            color: widget.night ? Colors.white54 : ShelfColors.muted,
-          ),
+        errorBuilder: (context, error, stackTrace) => ReaderErrorState(
+          night: widget.night,
+          message: '这一页无法解码，文件可能已损坏。',
         ),
       );
     },

@@ -12,6 +12,7 @@ import '../state/app_controller.dart';
 import '../theme.dart';
 import '../widgets/reader_edge_scrubber.dart';
 import '../widgets/reader_page_pill.dart';
+import '../widgets/reader_state_views.dart';
 import '../widgets/reader_top_bar.dart';
 
 class ReaderScreen extends StatefulWidget {
@@ -50,6 +51,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// 从而把无痕模式（或其他持有者）的保护一并解除。
   bool _holdsGuard = false;
 
+  /// 加载失败的说明；null 表示没有失败。
+  String? _loadError;
+
   @override
   void initState() {
     super.initState();
@@ -59,11 +63,24 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   Future<void> _load() async {
-    final items = await widget.controller.loadItems(widget.comicId);
+    List<ComicItemRecord> items;
+    try {
+      items = await widget.controller.loadItems(widget.comicId);
+    } catch (error) {
+      // 原先这里没有错误处理：读取失败会抛出未处理的异步异常，
+      // 界面永久停在加载状态且没有任何说明。
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadError = '无法读取这本漫画的页面：$error';
+      });
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _items = items;
       _loading = false;
+      _loadError = null;
     });
     if (widget.controller.summaryFor(widget.comicId)?.comic.isPrivate ??
         false) {
@@ -128,9 +145,20 @@ class _ReaderScreenState extends State<ReaderScreen>
         child: Stack(
           children: <Widget>[
             if (_loading)
-              Center(
-                child: CircularProgressIndicator(
-                  color: night ? Colors.white : ShelfColors.blue,
+              ReaderLoadingState(night: night, label: '正在打开漫画')
+            else if (_loadError case final message?)
+              ReaderErrorState(
+                night: night,
+                message: message,
+                action: FilledButton(
+                  onPressed: () {
+                    setState(() {
+                      _loading = true;
+                      _loadError = null;
+                    });
+                    _load();
+                  },
+                  child: const Text('重试'),
                 ),
               )
             else
