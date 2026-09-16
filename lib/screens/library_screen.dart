@@ -1434,6 +1434,22 @@ class _LibraryGridState extends State<_LibraryGrid> {
                     }
                     if (selectionMode || !widget.dragEnabled) return card;
 
+                    // 拖动反馈只带封面：用户要求拖动时只拖当前的封面图，
+                    // 下面的名称与数据留在原地。分组卡没有单独封面，
+                    // 仍按整卡拖动。
+                    final Widget dragVisual = entry.kind == ShelfEntryKind.comic
+                        ? _ComicCover(
+                            controller: controller,
+                            summary: comics.firstWhere(
+                              (item) => item.comic.id == entry.entityId,
+                            ),
+                            selectionMode: false,
+                            organizeMode: false,
+                            selected: false,
+                            onToggle: () {},
+                          )
+                        : card;
+
                     return _ShelfDropTarget(
                       target: entry,
                       organizeMode: organizeMode,
@@ -1451,9 +1467,11 @@ class _LibraryGridState extends State<_LibraryGrid> {
                         onDraggableCanceled: (_, _) => _finishDrag(),
                         feedback: _dragFeedback(
                           context,
-                          card,
+                          dragVisual,
                           width: cardWidth,
-                          height: cardExtent,
+                          height: entry.kind == ShelfEntryKind.comic
+                              ? cardWidth / ShelfMetrics.coverAspect
+                              : cardExtent,
                         ),
                         childWhenDragging: Opacity(opacity: 0.22, child: card),
                         child: card,
@@ -1917,8 +1935,102 @@ class _FolderMosaic extends StatelessWidget {
   }
 }
 
-class _ComicCard extends StatelessWidget {
-  const _ComicCard({
+/// 漫画卡片的封面部分。
+///
+/// 单独抽出来是为了让**拖动反馈只带封面**（用户要求：拖动时只拖当前封面图，
+/// 不带下面的名称与数据），同时保证拖动中与静止时的视觉完全一致——
+/// 圆角、私密/置顶角标、阅读进度条、选中框都由这里统一提供。
+class _ComicCover extends StatelessWidget {
+  const _ComicCover({
+    required this.controller,
+    required this.summary,
+    required this.selectionMode,
+    required this.organizeMode,
+    required this.selected,
+    required this.onToggle,
+  });
+
+  final AppController controller;
+  final ComicSummary summary;
+  final bool selectionMode;
+  final bool organizeMode;
+  final bool selected;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final comic = summary.comic;
+    return AspectRatio(
+      aspectRatio: ShelfMetrics.coverAspect,
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: summary.coverStoredPath == null
+                ? Container(
+                    color: ShelfColors.blueSoft,
+                    child: const Icon(
+                      Icons.image_outlined,
+                      color: ShelfColors.blue,
+                    ),
+                  )
+                : PrivateImage(
+                    controller: controller,
+                    originalPath: summary.coverStoredPath!,
+                    thumbnailPath: summary.coverThumbnailPath,
+                    cacheWidth: 300,
+                  ),
+          ),
+          if (comic.isPrivate)
+            const Positioned(
+              left: 6,
+              top: 6,
+              child: _CardBadge(icon: Icons.lock_rounded),
+            ),
+          if (comic.isPinned)
+            const Positioned(
+              right: 6,
+              top: 6,
+              child: _CardBadge(icon: Icons.push_pin_rounded),
+            ),
+          if (selectionMode)
+            Positioned(
+              right: 6,
+              bottom: 6,
+              child: Checkbox(
+                value: selected,
+                onChanged: (_) => onToggle(),
+                fillColor: const WidgetStatePropertyAll(ShelfColors.blue),
+              ),
+            ),
+          if (organizeMode)
+            const Positioned(
+              right: 6,
+              bottom: 6,
+              child: _CardBadge(icon: Icons.drag_indicator_rounded),
+            ),
+          if (summary.itemCount > 0)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: LinearProgressIndicator(
+                value: ((comic.lastReadPosition + 1) / summary.itemCount).clamp(
+                  0,
+                  1,
+                ),
+                minHeight: 3,
+                backgroundColor: Colors.black12,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ComicCard extends StatelessWidget {  const _ComicCard({
     required this.controller,
     required this.summary,
     required this.selected,
@@ -1946,70 +2058,13 @@ class _ComicCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          AspectRatio(
-            aspectRatio: 0.72,
-            child: Stack(
-              fit: StackFit.expand,
-              children: <Widget>[
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: summary.coverStoredPath == null
-                      ? Container(
-                          color: ShelfColors.blueSoft,
-                          child: const Icon(
-                            Icons.image_outlined,
-                            color: ShelfColors.blue,
-                          ),
-                        )
-                      : PrivateImage(
-                          controller: controller,
-                          originalPath: summary.coverStoredPath!,
-                          thumbnailPath: summary.coverThumbnailPath,
-                          cacheWidth: 300,
-                        ),
-                ),
-                if (comic.isPrivate)
-                  const Positioned(
-                    left: 6,
-                    top: 6,
-                    child: _CardBadge(icon: Icons.lock_rounded),
-                  ),
-                if (comic.isPinned)
-                  const Positioned(
-                    right: 6,
-                    top: 6,
-                    child: _CardBadge(icon: Icons.push_pin_rounded),
-                  ),
-                if (selectionMode)
-                  Positioned(
-                    right: 6,
-                    bottom: 6,
-                    child: Checkbox(
-                      value: selected,
-                      onChanged: (_) => onToggle(),
-                      fillColor: const WidgetStatePropertyAll(ShelfColors.blue),
-                    ),
-                  ),
-                if (organizeMode)
-                  const Positioned(
-                    right: 6,
-                    bottom: 6,
-                    child: _CardBadge(icon: Icons.drag_indicator_rounded),
-                  ),
-                if (summary.itemCount > 0)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: LinearProgressIndicator(
-                      value: ((comic.lastReadPosition + 1) / summary.itemCount)
-                          .clamp(0, 1),
-                      minHeight: 3,
-                      backgroundColor: Colors.black12,
-                    ),
-                  ),
-              ],
-            ),
+          _ComicCover(
+            controller: controller,
+            summary: summary,
+            selectionMode: selectionMode,
+            organizeMode: organizeMode,
+            selected: selected,
+            onToggle: onToggle,
           ),
           const SizedBox(height: ShelfMetrics.coverToTitle),
           SizedBox(

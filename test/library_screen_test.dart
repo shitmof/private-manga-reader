@@ -346,9 +346,22 @@ void main() {
     final sourceSize = tester.getSize(source);
     final gesture = await tester.startGesture(tester.getCenter(source));
     await tester.pump(const Duration(milliseconds: 600));
+    // 拖动反馈只带封面（用户要求拖动时只拖当前封面图，不带名称与数据），
+    // 因此宽度与卡片相同，高度为封面高（宽度 ÷ coverAspect），
+    // 比整张卡片矮一个文字块（名称 + 数据）。
+    final feedbackSize = tester.getSize(
+      find.byKey(const ValueKey<String>('shelf-drag-feedback')),
+    );
+    expect(feedbackSize.width, sourceSize.width);
     expect(
-      tester.getSize(find.byKey(const ValueKey<String>('shelf-drag-feedback'))),
-      sourceSize,
+      feedbackSize.height,
+      closeTo(sourceSize.width / ShelfMetrics.coverAspect, 0.5),
+      reason: '反馈高度应为封面高度，而不是整张卡片的高度',
+    );
+    expect(
+      feedbackSize.height,
+      lessThan(sourceSize.height),
+      reason: '不应再把名称与数据一起拖起来',
     );
     await gesture.moveTo(tester.getCenter(target));
     await tester.pump(const Duration(milliseconds: 700));
