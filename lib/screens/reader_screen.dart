@@ -228,6 +228,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                   widget.controller.preferences.showPageNumber,
               current: _items.isEmpty ? 0 : _currentIndex + 1,
               total: _items.length,
+              onTap: _items.isEmpty ? null : _promptPageInput,
             ),
           ],
         ),
@@ -293,6 +294,66 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (_currentIndex != targetPage && mounted) {
       setState(() => _currentIndex = targetPage);
     }
+  }
+
+  /// 直接输入页码跳转。
+  ///
+  /// 输入超范围时**修正到有效范围并明确告知**，而不是静默夹取；
+  /// 输入非数字同样提示，不抛异常。
+  Future<void> _promptPageInput() async {
+    final total = _items.length;
+    if (total == 0) return;
+    final controller = TextEditingController(
+      text: '${_currentIndex + 1}',
+    );
+    final input = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('跳转到页码'),
+        content: TextField(
+          key: const ValueKey<String>('reader-page-input'),
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          textInputAction: TextInputAction.go,
+          decoration: InputDecoration(
+            labelText: '页码',
+            helperText: '本漫画共 $total 页',
+          ),
+          onSubmitted: (value) =>
+              Navigator.of(dialogContext).pop(value),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+            child: const Text('跳转'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (input == null || !mounted) return;
+
+    final trimmed = input.trim();
+    if (trimmed.isEmpty) return;
+    final parsed = int.tryParse(trimmed);
+    if (parsed == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('“$trimmed”不是有效页码，请输入 1 到 $total 之间的数字')),
+      );
+      return;
+    }
+    final corrected = parsed.clamp(1, total);
+    if (corrected != parsed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已修正为第 $corrected 页（有效范围 1 到 $total）')),
+      );
+    }
+    _jumpToPage(corrected - 1);
   }
 
   Future<void> _saveBookmark() async {

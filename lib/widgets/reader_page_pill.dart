@@ -8,6 +8,7 @@ class ReaderPagePill extends StatelessWidget {
     required this.current,
     required this.total,
     this.night = false,
+    this.onTap,
     super.key,
   });
 
@@ -15,6 +16,9 @@ class ReaderPagePill extends StatelessWidget {
   final int current;
   final int total;
   final bool night;
+
+  /// 点击页码可直接输入跳转；为空时胶囊只作展示。
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -33,35 +37,55 @@ class ReaderPagePill extends StatelessWidget {
               duration: const Duration(milliseconds: 150),
               child: IgnorePointer(
                 ignoring: !visible,
-                child: Container(
-                  key: const ValueKey<String>('reader-page-pill'),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 7,
-                  ),
-                  decoration: BoxDecoration(
-                    color: night ? const Color(0xE6111418) : Colors.white,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: onTap,
                     borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: night ? Colors.white12 : ShelfColors.line,
-                    ),
-                    boxShadow: night
-                        ? const <BoxShadow>[]
-                        : const <BoxShadow>[
-                            BoxShadow(
-                              color: Color(0x14173A63),
-                              blurRadius: 14,
-                              offset: Offset(0, 4),
+                    child: Container(
+                      key: const ValueKey<String>('reader-page-pill'),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: night ? const Color(0xE6111418) : Colors.white,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: night ? Colors.white12 : ShelfColors.line,
+                        ),
+                        boxShadow: night
+                            ? const <BoxShadow>[]
+                            : const <BoxShadow>[
+                                BoxShadow(
+                                  color: Color(0x14173A63),
+                                  blurRadius: 14,
+                                  offset: Offset(0, 4),
+                                ),
+                              ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Text(
+                            '$current / $total',
+                            style: TextStyle(
+                              color: night ? Colors.white : ShelfColors.blue,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 11.5,
+                              height: 1,
+                            ),
+                          ),
+                          if (onTap != null) ...<Widget>[
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.edit_outlined,
+                              size: 11,
+                              color: night ? Colors.white54 : ShelfColors.muted,
                             ),
                           ],
-                  ),
-                  child: Text(
-                    '$current / $total',
-                    style: TextStyle(
-                      color: night ? Colors.white : ShelfColors.blue,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 11.5,
-                      height: 1,
+                        ],
+                      ),
                     ),
                   ),
                 ),

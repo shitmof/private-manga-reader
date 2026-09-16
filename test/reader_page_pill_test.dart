@@ -24,4 +24,45 @@ void main() {
     );
     expect(size.width, lessThan(140));
   });
+
+  testWidgets('提供点击回调时页码胶囊可点并显示编辑提示', (tester) async {
+    var taps = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Stack(
+            children: <Widget>[
+              ReaderPagePill(
+                visible: true,
+                current: 3,
+                total: 628,
+                onTap: () => taps += 1,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byIcon(Icons.edit_outlined), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey<String>('reader-page-pill')));
+    await tester.pump();
+    expect(taps, 1);
+  });
+
+  testWidgets('未提供回调时页码胶囊只作展示，不可点击', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Stack(
+            children: <Widget>[
+              ReaderPagePill(visible: true, current: 3, total: 628),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byIcon(Icons.edit_outlined), findsNothing);
+  });
 }
