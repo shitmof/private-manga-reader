@@ -481,7 +481,9 @@ class _LibraryScreenState extends State<LibraryScreen>
                       ),
                     ],
                   ),
-            floatingActionButton: _selectionMode || _organizeMode
+            // 空书架时隐藏 FAB：空状态里已经有「开始建立书架」调用同一个入口，
+            // 同时出现两个功能相同的按钮属于重复入口。
+            floatingActionButton: _selectionMode || _organizeMode || _isCompletelyEmpty
                 ? null
                 : FloatingActionButton(
                     onPressed: () => _createComic(context),

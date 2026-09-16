@@ -193,14 +193,9 @@ class _ReaderScreenState extends State<ReaderScreen>
                                     .clamp(360, 2400),
                             filterQuality: FilterQuality.medium,
                             errorBuilder: (context, error, stackTrace) =>
-                                Center(
-                                  child: Icon(
-                                    Icons.broken_image_outlined,
-                                    size: 42,
-                                    color: night
-                                        ? Colors.white54
-                                        : ShelfColors.muted,
-                                  ),
+                                ReaderErrorState(
+                                  night: night,
+                                  message: '这一页无法显示，原图可能已被移动或删除。',
                                 ),
                           ),
                         ),
