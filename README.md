@@ -39,11 +39,11 @@
 
 ## 下载 Android 安装包
 
-- [下载拾画阁 v1.6.1 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.6.1/shihuage-v1.6.1-android.apk)
+- [下载拾画阁 v1.6.2 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.6.2/shihuage-v1.6.2-android.apk)
 - 文件大小与 SHA-256：见对应 Release 说明
 - 兼容 ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`
 - **签名证书 SHA-256**：`1F6A95C4786F85D1F39DEDDBF61D0BCC56BEB2D9A59F1A3CA43AAF70B8A8391A`
-- 这是**唯一渠道**：v1.6.0 与 v1.6.1 使用同一把密钥，已装 v1.6.0 可直接覆盖升级、保留数据，无需卸载。
+- 这是**唯一渠道**：v1.6.0 / v1.6.1 / v1.6.2 使用同一把密钥，已装 v1.6.0 或 v1.6.1 可直接覆盖升级、保留数据，无需卸载。
 
 ## 构建时的签名
 
