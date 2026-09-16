@@ -117,20 +117,41 @@ abstract final class ShelfType {
 
 /// 动效时长。只做必要、清楚、轻量的动画。
 abstract final class ShelfMotion {
-  /// 按钮、选中状态反馈。
+  /// 按钮、选中状态反馈。规范 100–150ms。
   static const feedback = Duration(milliseconds: 120);
 
-  /// 阅读工具栏显示与隐藏。
+  /// 开关、选中态等稍慢一点的界面反馈，仍落在 100–150ms 区间内。
+  static const control = Duration(milliseconds: 140);
+
+  /// 阅读工具栏显示与隐藏。规范 160–200ms。
   static const toolbar = Duration(milliseconds: 180);
 
-  /// 卡片让位、面板开合。
+  /// 卡片让位、面板开合。规范 220–280ms。
   static const reflow = Duration(milliseconds: 240);
 
-  /// 合组完成。
+  /// 拖动落点让位。规范 220–280ms。
+  static const dropReflow = Duration(milliseconds: 220);
+
+  /// 合组完成。规范 280–320ms。
   static const groupFormed = Duration(milliseconds: 300);
+
+  /// 按钮按压回弹，需比 [feedback] 更快才有“跟手”感。
+  static const press = Duration(milliseconds: 110);
+
+  /// 进入阅读、打开分组等页面级过渡。规范 220–280ms。
+  static const pageEnter = Duration(milliseconds: 240);
+
+  /// 返回、关闭页面时的过渡，略快于进入。
+  static const pageExit = Duration(milliseconds: 200);
+
+  /// 「重新开始」滚回顶部的滚动时长。
+  static const restartScroll = Duration(milliseconds: 350);
 
   /// 快速定位条松手后隐藏的等待时间。
   static const scrubberHideDelay = Duration(milliseconds: 1100);
+
+  /// 系统关闭动画时的降级时长，保证功能仍可用而不是完全无反馈。
+  static const reduced = Duration(milliseconds: 80);
 }
 
 ThemeData buildShelfTheme(Brightness brightness) {

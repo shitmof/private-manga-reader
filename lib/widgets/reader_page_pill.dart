@@ -30,11 +30,11 @@ class ReaderPagePill extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 12),
           child: AnimatedSlide(
             offset: visible ? Offset.zero : const Offset(0, 0.7),
-            duration: const Duration(milliseconds: 180),
+            duration: ShelfMotion.toolbar,
             curve: Curves.easeOut,
             child: AnimatedOpacity(
               opacity: visible ? 1 : 0,
-              duration: const Duration(milliseconds: 150),
+              duration: ShelfMotion.control,
               child: IgnorePointer(
                 ignoring: !visible,
                 child: Material(

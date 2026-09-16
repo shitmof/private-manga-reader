@@ -60,7 +60,7 @@ class _ReaderEdgeScrubberState extends State<ReaderEdgeScrubber> {
   void _hideLater() {
     _hideTimer?.cancel();
     if (_dragging) setState(() => _dragging = false);
-    _hideTimer = Timer(const Duration(milliseconds: 1100), () {
+    _hideTimer = Timer(ShelfMotion.scrubberHideDelay, () {
       if (!mounted) return;
       setState(() => _visible = false);
     });
@@ -130,7 +130,7 @@ class _ReaderEdgeScrubberState extends State<ReaderEdgeScrubber> {
                       'reader-fast-scrubber-visibility',
                     ),
                     opacity: _visible ? 1 : 0,
-                    duration: const Duration(milliseconds: 150),
+                    duration: ShelfMotion.toolbar,
                     child: Stack(
                       clipBehavior: Clip.none,
                       children: <Widget>[

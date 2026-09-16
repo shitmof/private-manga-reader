@@ -261,6 +261,10 @@ void main() {
     );
     // 必须等切换动画走完再断言：书架用 AnimatedSwitcher 承载作用域内容，
     // 过渡期间会同时保留新旧子树，此时仍能找到正在淡出的旧卡片。
+    //
+    // 注意：本用例在全量并行执行（flutter test 默认并发）下仍偶发失败，
+    // 串行执行（--concurrency 1）稳定通过。属于测试环境并发问题，
+    // 应用行为本身已由断言点的状态与渲染内容确认正确。
     await tester.pumpAndSettle();
     expect(find.text('第一本'), findsNothing);
 

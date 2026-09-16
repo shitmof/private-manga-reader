@@ -134,7 +134,7 @@ class _RemoteReaderScreenState extends State<RemoteReaderScreen>
               onBack: () => Navigator.of(context).pop(),
               onRestart: () => _scrollController.animateTo(
                 0,
-                duration: const Duration(milliseconds: 350),
+                duration: ShelfMotion.restartScroll,
                 curve: Curves.easeOutCubic,
               ),
             ),

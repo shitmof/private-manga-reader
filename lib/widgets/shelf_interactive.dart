@@ -73,7 +73,7 @@ class _ShelfSwitch extends StatelessWidget {
       child: GestureDetector(
         onTap: enabled ? () => onChanged!(!value) : null,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
+          duration: ShelfMotion.control,
           curve: Curves.easeOutCubic,
           width: 50,
           height: 30,
@@ -106,7 +106,7 @@ class _ShelfSwitch extends StatelessWidget {
                 : const <BoxShadow>[],
           ),
           child: AnimatedAlign(
-            duration: const Duration(milliseconds: 180),
+            duration: ShelfMotion.control,
             curve: Curves.easeOutBack,
             alignment: value ? Alignment.centerRight : Alignment.centerLeft,
             child: Container(
@@ -159,10 +159,10 @@ class _ShelfGlowButtonState extends State<ShelfGlowButton> {
     final enabled = widget.onPressed != null;
     final button = AnimatedScale(
       scale: _pressed ? 0.97 : 1,
-      duration: const Duration(milliseconds: 110),
+      duration: ShelfMotion.press,
       curve: Curves.easeOut,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
+        duration: ShelfMotion.toolbar,
         height: 52,
         decoration: BoxDecoration(
           gradient: LinearGradient(

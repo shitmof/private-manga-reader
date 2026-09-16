@@ -214,7 +214,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               },
               onRestart: () => _scrollController.animateTo(
                 0,
-                duration: const Duration(milliseconds: 350),
+                duration: ShelfMotion.restartScroll,
                 curve: Curves.easeOutCubic,
               ),
               onBookmark: _saveBookmark,
