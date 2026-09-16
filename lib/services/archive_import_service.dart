@@ -193,6 +193,27 @@ class ArchiveImportService {
         .where((entry) => !_isIgnoredPath(entry.path))
         .toList(growable: false);
 
+    // 外层图片与内层包都要处理。
+    //
+    // 原先只要 archiveImages 非空就直接 return，不再扫描内层包；
+    // 因此外层放了 cover.jpg 的整包漫画，里面的 CBZ 会被**静默丢弃**。
+    // 现在按条目在压缩包中的先后顺序合并：外层图片作为一个条目，
+    // 内层包各自作为一个条目，顺序与用户在归档工具里看到的一致。
+    final nested = archive.entries
+        .where((entry) => entry.isFile && _isNestedArchivePath(entry.path))
+        .where((entry) => !_isIgnoredPath(entry.path))
+        .toList(growable: false);
+
+    if (archiveImages.isEmpty && nested.isEmpty) {
+      throw const FormatException('压缩包中没有可导入的图片，也没有内层压缩包');
+    }
+    if (nested.isNotEmpty && depth >= _maxNestedDepth) {
+      throw FormatException('内层压缩包嵌套超过 $_maxNestedDepth 层，已停止导入');
+    }
+
+    final results = <PreparedArchive>[];
+
+    // 1) 外层直接图片：合成一个条目，保持包内顺序。
     if (archiveImages.isNotEmpty) {
       if (archiveImages.any((entry) => entry.isEncrypted)) {
         throw const FormatException('压缩包已加密，请先解除密码后导入');
@@ -211,13 +232,13 @@ class ArchiveImportService {
           : archiveImages
                 .elementAtOrNull(metadata.coverArchiveIndex!)
                 ?.path;
-      return _ScanOutcome(<PreparedArchive>[
+      results.add(
         PreparedArchive(
           sourceIndex: sourceIndex,
           displayName: displayName,
           localFile: file,
           format: archive.format.name,
-          title: metadata.title ?? _titleFromName(displayName),
+          title: _titleFromName(displayName),
           pages: ordered
               .map(
                 (entry) => PreparedArchivePage(
@@ -231,24 +252,10 @@ class ArchiveImportService {
               : ordered.indexWhere((entry) => entry.path == coverPath),
           decodedBytes: decodedBytes,
         ),
-      ]);
+      );
     }
 
-    // 没有直接图片：尝试把内层压缩包解出来继续扫。
-    final nested = archive.entries
-        .where((entry) => entry.isFile && _isNestedArchivePath(entry.path))
-        .where((entry) => !_isIgnoredPath(entry.path))
-        .toList(growable: false);
-    if (nested.isEmpty) {
-      // 既没有图片也没有内层压缩包，才算真正的空包；
-      // 不再像原先那样「只扫最外层就宣布整个压缩包无内容」。
-      throw const FormatException('压缩包中没有可导入的图片，也没有内层压缩包');
-    }
-    if (depth >= _maxNestedDepth) {
-      throw FormatException('内层压缩包嵌套超过 $_maxNestedDepth 层，已停止导入');
-    }
-
-    final results = <PreparedArchive>[];
+    // 2) 内层压缩包：逐个解出后递归扫描。
     for (final entry in nested) {
       if (results.length >= _maxNestedArchives) {
         overflowErrors.add(
@@ -280,6 +287,7 @@ class ArchiveImportService {
         await nestedArchive?.close();
       }
     }
+
     if (results.isEmpty) {
       throw FormatException(
         overflowErrors.isEmpty ? '压缩包中没有可导入的图片' : overflowErrors.join('；'),
@@ -328,6 +336,7 @@ class ArchiveImportService {
     var skipped = 0;
     var completed = 0;
     final failures = <ImportFailure>[];
+    final attemptedKeys = <String>{};
     final startingItemCount = await _repository.itemCount(comicId);
     var firstArchiveCompleted = false;
 
@@ -337,6 +346,7 @@ class ArchiveImportService {
       archiveIndex++
     ) {
       final prepared = selection.archives[archiveIndex];
+      attemptedKeys.add(prepared.archiveKey);
       final beforeItems = await _repository.loadItems(comicId);
       final beforeIds = beforeItems.map((item) => item.id).toSet();
       var importedThisArchive = 0;
@@ -388,9 +398,14 @@ class ArchiveImportService {
             pageError?.fileName ?? prepared.displayName,
             pageError?.reason ?? _friendlyArchiveError(error),
             prepared.sourceIndex,
+            archiveKey: prepared.archiveKey,
           ),
         );
-        break;
+        // 继续处理后续压缩包，而不是 break。
+        //
+        // 原先这里直接 break：第一个包失败后，后面所有包都不会被尝试，
+        // 用户看到的结果就是「只导入了第一本」。
+        continue;
       } finally {
         await archive?.close();
       }
@@ -410,6 +425,7 @@ class ArchiveImportService {
       imported: imported,
       skippedDuplicates: skipped,
       failures: failures,
+      scanErrors: selection.errors,
     );
   }
 
@@ -690,6 +706,19 @@ class PreparedArchiveSelection {
   /// 部分内层压缩包未能导入的原因，逐项上报而不是只显示「失败」。
   final List<String> errors;
 
+  /// 只保留指定标识的压缩包，用于失败重试。
+  ///
+  /// 不能按 `sourceIndex` 筛选：同一外层包解出的内层包共用该值，
+  /// 那样会把已经成功的包也选回来并重复追加。
+  PreparedArchiveSelection retryOnly(Set<String> archiveKeys) =>
+      PreparedArchiveSelection(
+        archives
+            .where((archive) => archiveKeys.contains(archive.archiveKey))
+            .toList(growable: false),
+        errors: errors,
+        temporaryFiles: temporaryFiles,
+      );
+
   /// 本次准备过程产生的全部临时文件。
   ///
   /// 清理只在这里统一进行：内层包共用的外层临时文件不能挂在单本漫画上，
@@ -738,6 +767,12 @@ class PreparedArchive {
   final List<PreparedArchivePage> pages;
   final int coverPageIndex;
   final int decodedBytes;
+
+  /// 独立、可追踪的包标识。
+  ///
+  /// 同一外层包解出的多个内层包 `sourceIndex` 相同，
+  /// 用它做重试筛选会把已成功的包也选回来。此标识每次扫描唯一。
+  final String archiveKey = 'arc-${const Uuid().v4()}';
 }
 
 /// 一次压缩包扫描的结果：要么产出一本漫画，要么产出多个内层包对应的漫画。

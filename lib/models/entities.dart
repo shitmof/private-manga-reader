@@ -530,10 +530,22 @@ class RemotePage {
 }
 
 class ImportFailure {
-  const ImportFailure(this.fileName, this.reason, this.sourceIndex);
+  const ImportFailure(
+    this.fileName,
+    this.reason,
+    this.sourceIndex, {
+    this.archiveKey,
+  });
+
   final String fileName;
   final String reason;
   final int sourceIndex;
+
+  /// 失败的压缩包标识。
+  ///
+  /// 同一外层包解出的内层包**共用 `sourceIndex`**，
+  /// 因此不能用它定位要重试的包（会把已成功的也选回来）。
+  final String? archiveKey;
 }
 
 class ImportReport {
@@ -541,9 +553,18 @@ class ImportReport {
     required this.imported,
     required this.skippedDuplicates,
     required this.failures,
+    this.scanErrors = const <String>[],
   });
 
   final int imported;
   final int skippedDuplicates;
   final List<ImportFailure> failures;
+
+  /// 扫描阶段的问题（内层包损坏、深度超限、数量超限等）。
+  ///
+  /// 这些原先只记录在 selection 里、没有任何界面读取，
+  /// 会让用户在存在损坏章节时仍看到「导入完成」。
+  final List<String> scanErrors;
+
+  bool get hasProblems => failures.isNotEmpty || scanErrors.isNotEmpty;
 }

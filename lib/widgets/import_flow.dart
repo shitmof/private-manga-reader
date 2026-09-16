@@ -349,6 +349,7 @@ Future<ImportReport> _importPreparedSelection({
   var pending = selection;
   var imported = 0;
   var skipped = 0;
+  final seenScanErrors = <String>{};
   while (true) {
     final report = await controller.importArchives(
       comicId: comicId,
@@ -359,20 +360,28 @@ Future<ImportReport> _importPreparedSelection({
     );
     imported += report.imported;
     skipped += report.skippedDuplicates;
+    seenScanErrors.addAll(report.scanErrors);
     final aggregate = ImportReport(
       imported: imported,
       skippedDuplicates: skipped,
       failures: report.failures,
+      scanErrors: seenScanErrors.toList(growable: false),
     );
     if (!context.mounted) return aggregate;
     final retry = await _showArchiveResult(context, aggregate);
     if (retry != true || report.failures.isEmpty) return aggregate;
-    final failedSourceIndex = report.failures.first.sourceIndex;
-    pending = PreparedArchiveSelection(
-      selection.archives
-          .where((item) => item.sourceIndex >= failedSourceIndex)
-          .toList(growable: false),
-    );
+    // 按**包标识**重试，只处理失败的那些。
+    //
+    // 原先按 sourceIndex >= 首个失败项 筛选：同一外层包解出的内层包
+    // 共用同一个 sourceIndex，会把该包里已成功的也选回来，
+    // 在「保留重复」策略下重复追加内容。
+    final retryKeys = report.failures
+        .map((failure) => failure.archiveKey)
+        .whereType<String>()
+        .toSet();
+    if (retryKeys.isEmpty) return aggregate;
+    pending = pending.retryOnly(retryKeys);
+    if (pending.archives.isEmpty) return aggregate;
   }
 }
 
@@ -399,27 +408,48 @@ class _NewArchiveChoice {
 }
 
 Future<bool?> _showArchiveResult(BuildContext context, ImportReport report) {
-  final failure = report.failures.firstOrNull;
+  final failures = report.failures;
+  final scanErrors = report.scanErrors;
+  // 有失败或有扫描问题，都不能报「导入完成」。
+  final hasProblems = report.hasProblems;
+  final detail = <String>[
+    for (final failure in failures.take(4))
+      '${failure.fileName}：${failure.reason}',
+    for (final error in scanErrors.take(4)) error,
+  ].join('\n');
+  final moreCount =
+      (failures.length + scanErrors.length) -
+      (failures.take(4).length + scanErrors.take(4).length);
   return showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
-      title: Text(failure == null ? '压缩包导入完成' : '已暂停后续压缩包'),
+      title: Text(
+        !hasProblems
+            ? '压缩包导入完成'
+            : report.imported > 0
+            ? '部分导入成功'
+            : '压缩包导入失败',
+      ),
       content: Text(
         '成功 ${report.imported} 张'
         '${report.skippedDuplicates == 0 ? '' : '\n跳过重复 ${report.skippedDuplicates} 张'}'
-        '${failure == null ? '' : '\n\n${failure.fileName}：${failure.reason}\n失败压缩包已自动回滚，不会打乱后续顺序。'}',
+        '${failures.isEmpty ? '' : '\n失败 ${failures.length} 个压缩包'}'
+        '${scanErrors.isEmpty ? '' : '\n扫描问题 ${scanErrors.length} 项'}'
+        '${hasProblems ? '\n\n$detail' : ''}'
+        '${moreCount > 0 ? '\n…另有 $moreCount 项' : ''}'
+        '${failures.isEmpty ? '' : '\n\n失败压缩包已自动回滚，不会打乱后续顺序。'}',
       ),
       actions: <Widget>[
-        if (failure != null)
+        if (hasProblems)
           TextButton(
             onPressed: () => Navigator.pop(context, false),
             child: const Text('稍后处理'),
           ),
-        if (failure != null)
+        if (failures.isNotEmpty)
           FilledButton.icon(
             onPressed: () => Navigator.pop(context, true),
             icon: const Icon(Icons.refresh_rounded),
-            label: const Text('重试该包'),
+            label: Text('重试 ${failures.length} 个包'),
           )
         else
           FilledButton(
