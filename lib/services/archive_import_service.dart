@@ -94,6 +94,7 @@ class ArchiveImportService {
     await _storage.temporaryDirectory.create(recursive: true);
     final prepared = <PreparedArchive>[];
     final errors = <String>[];
+    final allTemporaryFiles = <String, File>{};
     try {
       for (var index = 0; index < sources.length; index++) {
         final source = sources[index];
@@ -113,9 +114,15 @@ class ArchiveImportService {
             overflowErrors: errors,
           );
           prepared.addAll(outcome.archives);
-          // 本次产生的临时文件由产出的每本漫画共同持有，导入结束后统一删除。
-          for (final item in outcome.archives) {
-            item.ownedFiles.addAll(ownedFiles);
+          // 统一登记本次产生的所有临时文件。
+          //
+          // 注意：不能把外层文件也挂到每本内层漫画的 ownedFiles 上。
+          // 外层临时文件是所有内层包共用的 localFile，
+          // 一旦某本漫画先完成导入并 dispose，就会把共用文件删掉，
+          // 导致后续漫画打开时失败（实测报 “Cannot open file”）。
+          // 因此清理只在 selection 层统一进行。
+          for (final file in ownedFiles) {
+            allTemporaryFiles.putIfAbsent(file.path, () => file);
           }
         } catch (error) {
           failure = error;
@@ -137,15 +144,17 @@ class ArchiveImportService {
           );
         }
       }
-      return PreparedArchiveSelection(prepared, errors: errors);
+      return PreparedArchiveSelection(
+        prepared,
+        errors: errors,
+        temporaryFiles: allTemporaryFiles.values.toList(growable: false),
+      );
     } catch (_) {
-      for (final archive in prepared) {
-        for (final file in archive.ownedFiles) {
-          try {
-            if (await file.exists()) await file.delete();
-          } on FileSystemException {
-            // 清理失败不应掩盖导入失败本身。
-          }
+      for (final file in allTemporaryFiles.values) {
+        try {
+          if (await file.exists()) await file.delete();
+        } on FileSystemException {
+          // 清理失败不应掩盖导入失败本身。
         }
       }
       rethrow;
@@ -670,12 +679,22 @@ class ArchiveImportService {
 }
 
 class PreparedArchiveSelection {
-  const PreparedArchiveSelection(this.archives, {this.errors = const <String>[]});
+  const PreparedArchiveSelection(
+    this.archives, {
+    this.errors = const <String>[],
+    this.temporaryFiles = const <File>[],
+  });
 
   final List<PreparedArchive> archives;
 
   /// 部分内层压缩包未能导入的原因，逐项上报而不是只显示「失败」。
   final List<String> errors;
+
+  /// 本次准备过程产生的全部临时文件。
+  ///
+  /// 清理只在这里统一进行：内层包共用的外层临时文件不能挂在单本漫画上，
+  /// 否则某本先完成导入就会把共用文件删掉，导致后续漫画打不开。
+  final List<File> temporaryFiles;
 
   int get totalPages =>
       archives.fold(0, (total, item) => total + item.pages.length);
@@ -687,15 +706,11 @@ class PreparedArchiveSelection {
       archives.isEmpty ? '未命名漫画' : archives.first.title;
 
   Future<void> dispose() async {
-    final seen = <String>{};
-    for (final archive in archives) {
-      for (final file in archive.ownedFiles) {
-        if (!seen.add(file.path)) continue;
-        try {
-          if (await file.exists()) await file.delete();
-        } on FileSystemException {
-          // 个别文件仍被占用时跳过，不影响其余清理。
-        }
+    for (final file in temporaryFiles) {
+      try {
+        if (await file.exists()) await file.delete();
+      } on FileSystemException {
+        // 个别文件仍被占用时跳过，不影响其余清理。
       }
     }
   }
@@ -715,18 +730,14 @@ class PreparedArchive {
 
   final int sourceIndex;
   final String displayName;
+
+  /// 本漫画对应的压缩包文件。内层包情况下指向解出来的临时文件。
   final File localFile;
   final String format;
   final String title;
   final List<PreparedArchivePage> pages;
   final int coverPageIndex;
   final int decodedBytes;
-
-  /// 本漫画依赖的所有临时文件。
-  ///
-  /// 顶层压缩包副本、以及由它解出的内层压缩包副本都要在这里登记，
-  /// 否则导入结束后会在临时目录里留下大量残留。
-  final List<File> ownedFiles = <File>[];
 }
 
 /// 一次压缩包扫描的结果：要么产出一本漫画，要么产出多个内层包对应的漫画。

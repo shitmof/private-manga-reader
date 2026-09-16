@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -836,6 +836,24 @@ void main() {
         selection.archives.map((a) => a.title).toList(),
         containsAll(<String>['连载_第1话 （2P）_aaaaaa', '连载_第2话 （2P）_bbbbbb']),
       );
+
+      // 关键：必须真的把**每一本**都导入一遍。
+      // 只断言 prepareArchives 的结果会漏掉「共用临时文件被先完成的漫画删掉」
+      // 这类问题——实测中它导致第二本报 “Cannot open file”。
+      final comic = await repository.createComic('嵌套包导入');
+      final report = await archiveImporter.importPrepared(
+        comicId: comic.id,
+        selection: selection,
+        // 用 keep 而不是 skip：两个内层包的图片内容相同（同尺寸同色），
+        // skip 会按内容去重跳过第二本的图，那样就验证不到「每本都被真正打开」。
+        duplicatePolicy: DuplicatePolicy.keep,
+      );
+      expect(
+        report.failures, isEmpty,
+        reason: '每一本内层包都应导入成功：${report.failures.map((f) => '${f.fileName}:${f.reason}')}',
+      );
+      expect(report.imported, 4, reason: '两本各 2 张，共 4 张');
+      expect((await repository.loadItems(comic.id)), hasLength(4));
     } finally {
       await selection.dispose();
       if (await sandbox.exists()) await sandbox.delete(recursive: true);

@@ -918,7 +918,10 @@ class _EmptyLibrary extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(32),
+        // 底部留白必须让开底部导航栏：原先只有 32，
+        // 在导航栏较高的设备上会把「开始建立书架」按钮压住一半，
+        // 导致按钮看得见却点不到。
+        padding: const EdgeInsets.fromLTRB(32, 32, 32, 96),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
