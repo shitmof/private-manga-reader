@@ -196,7 +196,25 @@ e76bbf7  feat(v1.6.2): 统一视觉参数集中化 + 书架标题规范
 |---|---|---|---|
 | v1.6.0 | `v1.6.0` | `shihuage-v1.6.0-android.apk` | **签名用错**，与其它版本不兼容 |
 | v1.6.1 | `v1.6.1` | `shihuage-v1.6.1-android.apk` | 已用 v1.6.0 密钥**重签**并替换资产 |
-| v1.6.2 | **未发布** | — | 开发中 |
+| **v1.6.2** | **`v1.6.2`** | **`shihuage-v1.6.2-android.apk`** | **已发布**（commit `8fa240e`）|
+
+### v1.6.2 发布事实（可核查）
+
+```
+Release   : https://github.com/shitmof/private-manga-reader/releases/tag/v1.6.2
+tag       : v1.6.2 → 8fa240e
+资产      : shihuage-v1.6.2-android.apk
+大小      : 66,871,594 字节
+SHA-256   : 5F3F87AAE68F07758B5CF81290C9D496431F7942BA66DDA1E3ACEDC96946E7E3
+证书      : 1F6A95C4786F85D1F39DEDDBF61D0BCC56BEB2D9A59F1A3CA43AAF70B8A8391A（与 v1.6.0/v1.6.1 同源）
+版本号    : 1.6.2+9
+```
+
+**发布过程中的一处自我纠正**：首次上传的资产名被 gh 取为 `app-release.apk`，
+与既有规范 `shihuage-v<版本>-android.apk` 不符（会让 README 链接失效）。
+已删除该 Release 并以规范文件名**重新发布**，重新核对哈希与本地构建产物一致。
+
+**未使用覆盖同名资产的方式**——这是审查提出的发布纪律要求。
 
 ### 4.2 工作区内的证据文件
 
