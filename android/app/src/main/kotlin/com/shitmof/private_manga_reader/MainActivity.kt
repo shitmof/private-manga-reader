@@ -14,7 +14,6 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.security.MessageDigest
 import java.util.ArrayDeque
 import java.util.UUID
 import java.util.zip.ZipFile
@@ -26,12 +25,18 @@ class MainActivity : FlutterFragmentActivity() {
     private var pendingMountResult: MethodChannel.Result? = null
     private var flutterReadyForArchives = false
     private val pendingArchives = mutableListOf<Map<String, String>>()
+    // 挂载读取和清缓存共用锁，避免删除仍在物化 / 解码的文件。
+    private val mountIoLock = Any()
+    private val archiveCache by lazy {
+        MountArchiveCache(File(cacheDir, "mount-archive"), mountCacheBudget()) {
+            StatFs(filesDir.absolutePath).availableBytes
+        }
+    }
 
     companion object {
         private const val TAG = "ShihuageMount"
         private const val MAX_PAGE_BYTES = 128 * 1024 * 1024
-        private const val ARCHIVE_CACHE_LIMIT = 6
-        private const val PART_STALE_MILLIS = 60 * 60 * 1000L
+        private const val DEFAULT_CACHE_BUDGET = 1024L * 1024 * 1024
     }
 
     private val createBackupDocument =
@@ -100,11 +105,43 @@ class MainActivity : FlutterFragmentActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             "private_manga_reader/storage",
         ).setMethodCallHandler { call, result ->
-            if (call.method == "getFreeSpace") {
-                val stats = StatFs(filesDir.absolutePath)
-                result.success(stats.availableBytes)
-            } else {
-                result.notImplemented()
+            when (call.method) {
+                "getFreeSpace" -> result.success(StatFs(filesDir.absolutePath).availableBytes)
+                "getImageDimensions" -> runAsync(result) {
+                    val path = call.argument<String>("path") ?: throw IllegalArgumentException("图片地址为空")
+                    val file = File(path).canonicalFile
+                    val applicationRoot = File(applicationInfo.dataDir).canonicalPath + File.separator
+                    require(file.path.startsWith(applicationRoot) && file.isFile) { "图片不在应用存储目录内" }
+                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeFile(file.path, options)
+                    if (options.outWidth > 0 && options.outHeight > 0) {
+                        // 仅头部尺寸不能证明可读；采样解码验证平台能力，避免整张原图占用内存。
+                        var sample = 1
+                        while (options.outWidth / sample > 512 || options.outHeight / sample > 512) sample *= 2
+                        val bitmap = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
+                        if (bitmap == null) null else {
+                            try { mapOf("width" to options.outWidth, "height" to options.outHeight) }
+                            finally { bitmap.recycle() }
+                        }
+                    } else null
+                }
+                "getMountArchiveCacheBytes" -> runAsync(result) {
+                    archiveCache.bytes()
+                }
+                "getMountArchiveCacheBudget" -> result.success(mountCacheBudget())
+                "setMountArchiveCacheBudget" -> runAsync(result) {
+                    val bytes = (call.argument<Number>("bytes") ?: throw IllegalArgumentException("预算为空")).toLong()
+                    val allowed = listOf(256L, 512L, 1024L, 2048L, 4096L).map { it * 1024 * 1024 }
+                    require(bytes in allowed) { "不支持的缓存预算" }
+                    archiveCache.setBudget(bytes)
+                    getSharedPreferences("mount-cache", MODE_PRIVATE).edit().putLong("budget", bytes).apply()
+                    null
+                }
+                "clearMountArchiveCache" -> runAsync(result) {
+                    archiveCache.clear()
+                    null
+                }
+                else -> result.notImplemented()
             }
         }
 
@@ -208,7 +245,7 @@ class MainActivity : FlutterFragmentActivity() {
     private fun runAsync(result: MethodChannel.Result, action: () -> Any?) {
         Thread {
             try {
-                val value = action()
+                val value = synchronized(mountIoLock) { action() }
                 runOnUiThread { result.success(value) }
             } catch (error: Exception) {
                 runOnUiThread {
@@ -217,6 +254,9 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }.start()
     }
+
+    private fun mountCacheBudget(): Long =
+        getSharedPreferences("mount-cache", MODE_PRIVATE).getLong("budget", DEFAULT_CACHE_BUDGET)
 
     private data class DocumentRow(
         val uri: Uri,
@@ -317,7 +357,7 @@ class MainActivity : FlutterFragmentActivity() {
     )
 
     private fun listZipEntries(uri: Uri): List<Map<String, Any>> {
-        openZip(uri).use { zip ->
+        openZip(uri, refresh = true).use { zip ->
             val entries = zip.entries().asSequence()
                 .filter { !it.isDirectory && isImage(it.name) }
                 .take(10000)
@@ -348,32 +388,23 @@ class MainActivity : FlutterFragmentActivity() {
     /// 导致一个条目都读不出来（实测用户提供的 CBZ 全部是这种格式）。
     /// ZipFile 读的是中央目录（那里 compressedSize 有值），完全不受影响；
     /// 云盘类文档提供者只暴露流时，就只能先落到本地再走中央目录。
-    /// 缓存名由 uri 摘要决定，同一文档只复制一次。
-    private fun materializeToCache(uri: Uri): File? {
-        val digest = MessageDigest.getInstance("SHA-1")
-            .digest(uri.toString().toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
-        val cached = File(cacheDir, "mount-archive/$digest.zip")
-        if (cached.exists() && cached.length() > 0) return cached
-        cached.parentFile?.mkdirs()
-        val staging = File(cached.parentFile, "$digest.part")
-        return try {
-            contentResolver.openInputStream(uri)?.use { input ->
-                staging.outputStream().buffered(1024 * 1024).use { output ->
-                    input.copyTo(output, bufferSize = 1024 * 1024)
+    /// 大小 + 修改时间改变则读取新版本；缺少修改时间时只在当前读取会话复用。
+    private fun materializeToCache(uri: Uri, refresh: Boolean): File {
+        var size = 0L
+        var modified = 0L
+        try {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val sizeColumn = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    val modifiedColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                    if (sizeColumn >= 0 && !cursor.isNull(sizeColumn)) size = cursor.getLong(sizeColumn).coerceAtLeast(0)
+                    if (modifiedColumn >= 0 && !cursor.isNull(modifiedColumn)) modified = cursor.getLong(modifiedColumn).coerceAtLeast(0)
                 }
-            } ?: return null
-            if (cached.exists()) cached.delete()
-            if (!staging.renameTo(cached)) {
-                staging.copyTo(cached, overwrite = true)
-                staging.delete()
             }
-            Log.i(TAG, "已缓存挂载压缩包用于随机读取：${cached.name} (${cached.length()} 字节)")
-            cached
-        } catch (error: Exception) {
-            Log.w(TAG, "缓存挂载压缩包失败", error)
-            staging.delete()
-            null
+        } catch (_: Exception) { /* 不提供元数据的提供者在重新索引时强制刷新。 */ }
+        val revision = if (modified > 0) "$size:$modified" else null
+        return archiveCache.materialize(uri.toString(), revision, size, refresh) {
+            contentResolver.openInputStream(uri) ?: throw IllegalStateException("无法读取原压缩包")
         }
     }
 
@@ -388,38 +419,10 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     /// 先试直接随机读取，失败则物化到缓存再读。
-    private fun openZip(uri: Uri): ZipFile {
+    private fun openZip(uri: Uri, refresh: Boolean = false): ZipFile {
         openDirectZip(uri)?.let { return it }
-        val cached = materializeToCache(uri) ?: throw IllegalStateException("无法读取该压缩包")
-        pruneArchiveCache(cached)
+        val cached = materializeToCache(uri, refresh)
         return ZipFile(cached)
-    }
-
-    /// 修剪物化缓存，避免长期使用后无限增长。
-    ///
-    /// 保留最近使用的一小批；只删本方法自己创建的 mount-archive/*.zip 与残留 .part，
-    /// 不触碰缓存目录下的其它内容。
-    private fun pruneArchiveCache(keep: File) {
-        try {
-            val directory = File(cacheDir, "mount-archive")
-            val files = directory.listFiles()?.filter { it.isFile } ?: return
-            val ordered = files.sortedByDescending { it.lastModified() }
-            var kept = 0
-            for (file in ordered) {
-                val isKeepTarget = file.absolutePath == keep.absolutePath
-                val isStale = file.name.endsWith(".part") &&
-                    System.currentTimeMillis() - file.lastModified() > PART_STALE_MILLIS
-                if (isKeepTarget || (kept < ARCHIVE_CACHE_LIMIT && !isStale)) {
-                    kept++
-                    continue
-                }
-                if (file.delete()) {
-                    Log.i(TAG, "已清理物化缓存：${file.name}")
-                }
-            }
-        } catch (error: Exception) {
-            Log.w(TAG, "清理物化缓存失败", error)
-        }
     }
 
     private fun readPage(uri: Uri, archiveEntry: String?): ByteArray {

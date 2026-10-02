@@ -12,10 +12,10 @@
 - 从系统相册或文件选择器批量导入，保留选择顺序
 - 整包导入 CBZ/ZIP、CBR/RAR、CB7/7z、CBT/TAR；读取 `ComicInfo.xml`，按作者目录与数字自然顺序建册
 - 多个压缩包按系统选择队列依次解压；后一包始终追加在前一包末尾
-- App 不设单批 100 张限制；可连续追加，单本统一上限为 1000 张
+- App 不设单批 100 张限制；可连续追加，单本统一上限为 10000 张；超过上限在导入前提示
 - 导入原图不压缩、不重编码；复制后再次计算 SHA-256 校验
 - 相同内容只物理保存一份，同一本或不同漫画可多次引用
-- 单本最多 1000 张；支持单选、多选、全选、范围选择、批量删除、块移动、页码移动与独立封面
+- 单本最多 10000 张；支持单选、多选、全选、范围选择、批量删除、块移动、页码移动与独立封面
 - 逐项导入、失败项报告与原选择项直接重试
 - 导入前估算体积，Android 实机检查私有目录所在磁盘的可用空间
 - 永久原图与可清理、可重建的缩略图缓存分离
@@ -26,7 +26,7 @@
 - 完整 `.mangabackup` 备份与恢复；可通过系统文档选择器保存到手机、SD 卡或云盘，卸载后仍可找回
 - 漫画移入回收站、恢复、永久删除；页面多选删除与无引用原图清理彼此分离
 - 只读挂载 WebDAV、OPDS/Komga/Kavita、SMB/NAS；网络缓存可清，阅读进度留在本机
-- Android SAF 原地挂载图片目录和 ZIP/CBZ：不复制原文件，压缩包按需直读，仅保存可重建索引和受控图片缓存
+- Android SAF 原地挂载图片目录和 ZIP/CBZ：支持按需直读；不可随机访问的提供者会物化压缩包缓存，默认预算 1 GiB，可在存储页调整或清理
 - 挂载记录连接状态、最后成功/同步时间、脱敏错误和重新认证入口
 - Android 文件关联：在文件管理器点击 CBZ/ZIP/CBR/RAR/CB7/7z/CBT/TAR 可直接进入导入流程
 - 本地漫画按当前编辑顺序无损导出 CBZ，并可保存到手机/云盘或调用系统分享
@@ -39,7 +39,7 @@
 
 ## 下载 Android 安装包
 
-- [下载拾画阁 v1.6.2 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.6.2/shihuage-v1.6.2-android.apk)
+- [下载拾画阁 v1.6.3 APK](https://github.com/shitmof/private-manga-reader/releases/download/v1.6.3/shihuage-v1.6.3-android.apk)
 - 文件大小与 SHA-256：见对应 Release 说明
 - 兼容 ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`
 - **签名证书 SHA-256**：`3724690E26BAE1597AD10221C10F2B2B15ADE2A5BFDBAF408834DC46EAACE1A5`
@@ -59,11 +59,11 @@
 debug 密钥——那会签出「同一台设备无法覆盖安装」的包。
 
 ```properties
-storeFile=shihuage-v160-channel.keystore
-storePassword=android
+storeFile=shihuage-legacy-channel.keystore
+storePassword=<本地密钥密码>
 keyAlias=androiddebugkey
-keyPassword=android
-expectedCertSha256=1F6A95C4786F85D1F39DEDDBF61D0BCC56BEB2D9A59F1A3CA43AAF70B8A8391A
+keyPassword=<本地条目密码>
+expectedCertSha256=3724690E26BAE1597AD10221C10F2B2B15ADE2A5BFDBAF408834DC46EAACE1A5
 ```
 
 - `key.properties` 缺失、未声明 `storeFile`、或 `expectedCertSha256` 与实际指纹不符时，
@@ -72,7 +72,7 @@ expectedCertSha256=1F6A95C4786F85D1F39DEDDBF61D0BCC56BEB2D9A59F1A3CA43AAF70B8A83
 - 构建日志会打印实际使用的密钥路径与证书指纹。
 - 解析时会剥离 UTF-8 BOM（Windows 的 `Set-Content -Encoding UTF8` 会写入 BOM，
   BOM 会污染第一行键名使 `storeFile` 失效）。
-- 未提供 `key.properties` 时回退到 `$HOME/.android/debug.keystore`，构建日志会打印实际使用的路径。
+- 发布构建同时固定官方渠道指纹，不能通过随意修改本地预期指纹切换密钥。默认 debug 密钥回退仅用于显式允许的本地开发构建。
 
 仓库与 Release 已公开，无需登录即可下载。仓库当前未附加开源许可证，默认保留所有权利；公开不代表自动授权复制、修改或再分发。
 
@@ -95,7 +95,9 @@ Application Support/
 
 SQLite 只保存相对路径。备份恢复到另一台设备时不会依赖旧设备绝对路径。
 
-SAF 原地挂载只在数据库保存可重建索引；原文件仍位于用户选择的目录。阅读页解码结果只进入受 120 项/96 MiB 上限约束的内存图片缓存，不创建第二份永久原图。
+SAF 原地挂载只在数据库保存可重建索引；原文件仍位于用户选择的目录。支持直接随机访问的 ZIP 不复制；其他提供者可能需要整包缓存，最多 6 个且同时受字节预算限制，默认 1 GiB，可调整为 256 MiB～4 GiB。清理缓存不会删除原文件。修改时间未知的提供者在用户刷新后会重建索引，避免误读同 URI 的旧包。
+
+阅读页解码结果受 120 项/96 MiB 内存图片缓存上限约束。备份原图逐文件流式写入，完整关闭后才显示为正式备份；导入、备份与恢复会预检可用空间。数据库保持 schema 8，导出备份保持 v4，并接受 v1～v4 旧备份。
 
 ## 开发与验证
 
@@ -113,6 +115,8 @@ Windows 上 Flutter AOT 对中文真实路径仍有兼容性边界。代码保�
 
 ## 产品与回退
 
+- v1.6.3 修复与复核：[docs/FIX_REPORT_2026-10-02.md](docs/FIX_REPORT_2026-10-02.md)
+- v1.6.3 发布说明：[docs/RELEASE_NOTES_V1.6.3.md](docs/RELEASE_NOTES_V1.6.3.md)
 - 产品行为规格：[docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md)
 - v1.5 白蓝阅读器、统一动效与动态书单规格：[docs/V1.5_LIGHT_READER_MOTION_COLLECTION_DESIGN.md](docs/V1.5_LIGHT_READER_MOTION_COLLECTION_DESIGN.md)
 - v1.5 发布说明：[docs/RELEASE_NOTES_V1.5.0.md](docs/RELEASE_NOTES_V1.5.0.md)

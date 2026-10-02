@@ -6,6 +6,7 @@ import '../theme.dart';
 import '../widgets/formatters.dart';
 import '../widgets/shelf_interactive.dart';
 import 'network_sources_screen.dart';
+import 'local_storage_screen.dart';
 import 'trash_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -19,9 +20,11 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late Future<LibraryStats> _stats = widget.controller.loadStats();
+  late Future<int> _networkBytes = widget.controller.networkCacheBytes();
 
-  void _refreshStats() =>
-      setState(() => _stats = widget.controller.loadStats());
+  void _refreshStats() => setState(() {
+    _stats = widget.controller.loadStats();
+  });
 
   /// 统一的偏好读取入口。
   ///
@@ -196,7 +199,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const Divider(height: 1, indent: 56),
                 FutureBuilder<int>(
-                  future: widget.controller.networkCacheBytes(),
+                  future: _networkBytes,
                   builder: (context, snapshot) => ListTile(
                     leading: const Icon(Icons.offline_pin_outlined),
                     title: const Text('网络阅读缓存'),
@@ -220,6 +223,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 margin: EdgeInsets.zero,
                 child: Column(
                   children: <Widget>[
+                    ListTile(
+                      leading: const Icon(
+                        Icons.folder_copy_outlined,
+                        color: ShelfColors.blue,
+                      ),
+                      title: const Text('本地资料与空间'),
+                      subtitle: const Text('查看原图、备份与缓存，安全释放空间'),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => LocalStorageScreen(
+                              storage: widget.controller.storage,
+                            ),
+                          ),
+                        );
+                        if (!mounted) return;
+                        _refreshStats();
+                        setState(() {
+                          _networkBytes = widget.controller.networkCacheBytes();
+                        });
+                      },
+                    ),
+                    const Divider(height: 1, indent: 56),
                     _StorageRow(
                       color: ShelfColors.blue,
                       title: '私有原图',
@@ -292,8 +319,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: <Widget>[
                 ListTile(
                   leading: const Icon(Icons.archive_outlined),
-                  title: const Text('保存完整备份到手机/云盘'),
-                  subtitle: const Text('包含漫画、分组、书单、书签、进度与原图；卸载后仍可找回'),
+                  title: const Text('保存完整备份到手机'),
+                  subtitle: const Text('包含原图、书架与阅读记录；请另存到“下载”等公共目录，卸载后才能恢复'),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: _createBackup,
                 ),
@@ -341,7 +368,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 24),
           const Center(
             child: Text(
-              '拾画阁 1.6.2',
+              '拾画阁 1.6.3',
               style: TextStyle(color: ShelfColors.muted, fontSize: 12),
             ),
           ),
@@ -489,8 +516,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SnackBar(
             content: Text(
               destination == null
-                  ? '已取消另存；应用内安全副本仍在：${file.path.split(RegExp(r'[/\\]')).last}'
-                  : '完整备份已保存到你选择的手机或云盘位置',
+                  ? '已取消另存；仅有应用内副本，卸载仍可能丢失：${file.path.split(RegExp(r'[/\\]')).last}'
+                  : '完整备份已保存到你选择的位置，请妥善保留',
             ),
           ),
         );

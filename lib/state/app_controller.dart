@@ -442,6 +442,16 @@ class AppController extends ChangeNotifier {
     return null;
   }
 
+  /// 漫画可自行设为私密，也可继承所在分组的私密保护。
+  bool isComicPrivate(String comicId) {
+    final comic = summaryFor(comicId)?.comic;
+    if (comic == null) return false;
+    if (comic.isPrivate) return true;
+    return folders.any(
+      (folder) => folder.id == comic.folderId && folder.isPrivate,
+    );
+  }
+
   String filePath(String relativePath) => storage.resolve(relativePath);
 
   Future<Comic> createComic(String title) async {
@@ -832,6 +842,9 @@ class AppController extends ChangeNotifier {
   }
 
   Future<ComicExportResult> createComicExport(String comicId) async {
+    if (isComicPrivate(comicId) && !await unlockPrivateShelf()) {
+      throw StateError('未通过身份验证，未导出私密漫画');
+    }
     operation = const OperationProgress(
       title: '正在生成 CBZ',
       completed: 0,

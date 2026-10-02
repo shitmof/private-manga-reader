@@ -25,38 +25,70 @@ class BackupService {
 
   Future<File> createBackup({String prefix = 'shihuage'}) async {
     final stamp = _timestamp(DateTime.now());
-    final staging = Directory(
-      p.join(_storage.temporaryDirectory.path, 'backup-${_uuid.v4()}'),
+    final backup = File(
+      p.join(
+        _storage.backupsDirectory.path,
+        '$prefix-$stamp-${_uuid.v4()}.mangabackup',
+      ),
     );
-    await staging.create(recursive: true);
+    final partial = File('${backup.path}.partial');
+    OutputFileStream? output;
+    FileHandle? outputHandle;
     try {
       final manifest = await _repository.exportManifest();
-      final manifestFile = File(p.join(staging.path, 'manifest.json'));
-      await manifestFile.writeAsString(
-        _repository.encodeManifest(manifest),
-        flush: true,
-      );
+      final manifestBytes = utf8.encode(_repository.encodeManifest(manifest));
       final assets = await _repository.allAssets();
+      var originalBytes = 0;
       for (final asset in assets) {
+        _validateAssetPaths(asset);
         final source = File(_storage.resolve(asset.storedPath));
         if (!await source.exists()) {
           throw FileSystemException('原图缺失，已停止备份', asset.originalFileName);
         }
-        final target = File(p.join(staging.path, asset.storedPath));
-        await target.parent.create(recursive: true);
-        await source.copy(target.path);
+        originalBytes += await source.length();
       }
-      final backup = File(
-        p.join(_storage.backupsDirectory.path, '$prefix-$stamp.mangabackup'),
+      // 原图直接流入 ZIP，临时空间只需一份备份及目录开销。
+      await _ensureSpace(
+        originalBytes + manifestBytes.length + (assets.length + 1) * 1024,
       );
-      await ZipFileEncoder().zipDirectory(
-        staging,
-        filename: backup.path,
-        level: ZipFileEncoder.store,
+      final handle = FileHandle(partial.path, mode: FileAccess.write);
+      outputHandle = handle;
+      final writer = OutputFileStream.withFileHandle(handle);
+      output = writer;
+      final encoder = ZipFileEncoder()..createWithStream(writer);
+      encoder.addArchiveFile(
+        ArchiveFile('manifest.json', manifestBytes.length, manifestBytes)
+          ..compression = CompressionType.none,
       );
+      for (final asset in assets) {
+        final source = File(_storage.resolve(asset.storedPath));
+        final input = InputFileStream(source.path);
+        try {
+          final entry = ArchiveFile.stream(
+            asset.storedPath.replaceAll('\\', '/'),
+            input,
+          )..compression = CompressionType.none;
+          encoder.addArchiveFile(entry);
+        } finally {
+          await input.close();
+        }
+      }
+      await encoder.close();
+      await partial.rename(backup.path);
       return backup;
-    } finally {
-      if (await staging.exists()) await staging.delete(recursive: true);
+    } catch (error, stack) {
+      // 只在完整 ZIP 关闭后发布文件名；失败残片不能成为可选的恢复点。
+      try {
+        await output?.close();
+      } catch (_) {}
+      // 磁盘写满时 close 的 flush 也可能失败，直接关底层句柄才能删残片。
+      try {
+        await outputHandle?.close();
+      } catch (_) {}
+      try {
+        if (await partial.exists()) await partial.delete();
+      } catch (_) {}
+      Error.throwWithStackTrace(error, stack);
     }
   }
 
@@ -103,21 +135,40 @@ class BackupService {
     );
     await restoreRoot.create(recursive: true);
     final archiveFile = File(p.join(restoreRoot.path, 'source.mangabackup'));
+    final extractedRoot = Directory(p.join(restoreRoot.path, 'contents'));
+    final newlyInstalled = <File>[];
+    final pendingCopies = <File>[];
+    var manifestApplied = false;
+    Object? restoreError;
     try {
+      await _ensureSpace(await source.length());
       final output = archiveFile.openWrite();
-      await for (final chunk in source.readAsByteStream()) {
-        output.add(chunk);
+      try {
+        await output.addStream(source.readAsByteStream());
+      } catch (error, stack) {
+        // 读取或落盘失败后也必须关句柄；关闭异常不能盖掉原始错误。
+        try {
+          await output.close();
+        } catch (_) {}
+        Error.throwWithStackTrace(error, stack);
       }
       await output.close();
       final input = InputFileStream(archiveFile.path);
       final Archive archive;
       try {
         archive = ZipDecoder().decodeStream(input, verify: true);
-        await extractArchiveToDisk(archive, restoreRoot.path);
+        _validateArchiveEntries(archive);
+        var extractedBytes = 0;
+        for (final entry in archive) {
+          if (entry.size < 0) throw const FormatException('备份文件尺寸无效');
+          if (entry.isFile) extractedBytes += entry.size;
+        }
+        await _ensureSpace(extractedBytes);
+        await extractArchiveToDisk(archive, extractedRoot.path);
       } finally {
         await input.close();
       }
-      final manifestFile = File(p.join(restoreRoot.path, 'manifest.json'));
+      final manifestFile = File(p.join(extractedRoot.path, 'manifest.json'));
       if (!await manifestFile.exists()) {
         throw const FormatException('备份中缺少 manifest.json');
       }
@@ -135,7 +186,8 @@ class BackupService {
       }
       final assets = _assetRows(manifest['assets']);
       for (final asset in assets) {
-        final extracted = File(p.join(restoreRoot.path, asset.storedPath));
+        _validateAssetPaths(asset);
+        final extracted = File(p.join(extractedRoot.path, asset.storedPath));
         if (!await extracted.exists()) {
           throw FormatException('备份原图缺失：${asset.originalFileName}');
         }
@@ -143,20 +195,49 @@ class BackupService {
         if (hash != asset.contentHash) {
           throw FormatException('备份原图校验失败：${asset.originalFileName}');
         }
+        // 旧版会直接跳过同名文件，导致数据库恢复成功但实际仍读取损坏原图。
+        // 在备份或更改任何现存数据前拒绝冲突，不静默覆盖用户文件。
+        final existing = File(_storage.resolve(asset.storedPath));
+        if (await existing.exists()) {
+          final existingHash = (await sha256.bind(existing.openRead()).first)
+              .toString();
+          if (existingHash != asset.contentHash) {
+            throw FormatException(
+              '本地原图与备份存在内容冲突，已停止恢复且未覆盖数据：${asset.originalFileName}',
+            );
+          }
+        }
       }
 
+      var restoreWriteBytes = 0;
+      for (final currentAsset in await _repository.allAssets()) {
+        final current = File(_storage.resolve(currentAsset.storedPath));
+        if (await current.exists()) restoreWriteBytes += await current.length();
+      }
+      for (final asset in assets) {
+        if (!await File(_storage.resolve(asset.storedPath)).exists()) {
+          restoreWriteBytes += await File(
+            p.join(extractedRoot.path, asset.storedPath),
+          ).length();
+        }
+      }
+      // 在写安全备份前同时预留安全备份和新增原图，避免写到一半才发现不足。
+      await _ensureSpace(restoreWriteBytes + (assets.length + 1) * 1024);
       final safetyBackup = await createBackup(prefix: 'recovery-pre-restore');
       for (final asset in assets) {
-        final sourceFile = File(p.join(restoreRoot.path, asset.storedPath));
+        final sourceFile = File(p.join(extractedRoot.path, asset.storedPath));
         final target = File(_storage.resolve(asset.storedPath));
         await target.parent.create(recursive: true);
         if (!await target.exists()) {
           final temporary = File('${target.path}.restore-${_uuid.v4()}');
+          pendingCopies.add(temporary);
           await sourceFile.copy(temporary.path);
           await temporary.rename(target.path);
+          newlyInstalled.add(target);
         }
       }
       await _repository.replaceFromManifest(manifest);
+      manifestApplied = true;
       if (manifest['version'] == 2 || manifest['version'] == 3) {
         if (await _storage.networkCacheDirectory.exists()) {
           await _storage.networkCacheDirectory.delete(recursive: true);
@@ -164,8 +245,28 @@ class BackupService {
         await _storage.networkCacheDirectory.create(recursive: true);
       }
       return safetyBackup;
+    } catch (error, stack) {
+      restoreError = error;
+      // 数据库事务拒绝清单或复制失败时，只回收本次新建的文件。
+      // 已经成功替换书库后，清缓存失败也不能删除已恢复的原图。
+      final failedFiles = <File>[
+        ...pendingCopies,
+        if (!manifestApplied) ...newlyInstalled,
+      ];
+      for (final file in failedFiles) {
+        try {
+          if (await file.exists()) await file.delete();
+        } catch (_) {}
+      }
+      Error.throwWithStackTrace(error, stack);
     } finally {
-      if (await restoreRoot.exists()) await restoreRoot.delete(recursive: true);
+      try {
+        if (await restoreRoot.exists()) {
+          await restoreRoot.delete(recursive: true);
+        }
+      } catch (_) {
+        if (restoreError == null) rethrow;
+      }
     }
   }
 
@@ -179,6 +280,54 @@ class BackupService {
           );
         })
         .toList(growable: false);
+  }
+
+  Future<void> _ensureSpace(int requiredBytes) async {
+    const reserveBytes = 16 * 1024 * 1024;
+    final available = await _storage.freeBytes();
+    if (available != null && available < requiredBytes + reserveBytes) {
+      throw const FileSystemException('手机存储空间不足，已停止操作且保留原有书库');
+    }
+  }
+
+  void _validateAssetPaths(AssetRecord asset) {
+    final original = _safeRelativePath(asset.storedPath);
+    final thumbnail = _safeRelativePath(asset.thumbnailPath);
+    if (!original.startsWith('assets/') ||
+        !thumbnail.startsWith('thumbnails/')) {
+      throw const FormatException('备份图片路径不在规定的存储目录内');
+    }
+  }
+
+  void _validateArchiveEntries(Archive archive) {
+    final paths = <String>{};
+    for (final entry in archive) {
+      if (entry.isSymbolicLink) {
+        throw const FormatException('备份不允许包含符号链接');
+      }
+      final name = entry.isDirectory
+          ? entry.name.replaceFirst(RegExp(r'[/\\]+$'), '')
+          : entry.name;
+      final path = _safeRelativePath(name);
+      if (!paths.add(path.toLowerCase())) {
+        throw const FormatException('备份包含重复的文件路径');
+      }
+    }
+  }
+
+  String _safeRelativePath(String value) {
+    final normalized = value.replaceAll('\\', '/');
+    final segments = normalized.split('/');
+    if (normalized.isEmpty ||
+        normalized.startsWith('/') ||
+        normalized.contains(':') ||
+        normalized.contains('\u0000') ||
+        segments.any(
+          (segment) => segment.isEmpty || segment == '.' || segment == '..',
+        )) {
+      throw const FormatException('备份包含不安全的文件路径');
+    }
+    return normalized;
   }
 
   String _timestamp(DateTime time) {

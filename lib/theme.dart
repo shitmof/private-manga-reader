@@ -196,6 +196,12 @@ ThemeData buildShelfTheme(Brightness brightness) {
       toolbarHeight: 60,
       titleTextStyle: TextStyle(
         color: foreground,
+        fontFamily: 'Noto Sans CJK SC',
+        fontFamilyFallback: const [
+          'Source Han Sans SC',
+          'PingFang SC',
+          'Microsoft YaHei',
+        ],
         fontSize: ShelfType.pageTitle,
         fontWeight: FontWeight.w600,
         letterSpacing: -0.5,

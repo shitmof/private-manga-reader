@@ -154,6 +154,8 @@ class LocalMountService {
       throw ArgumentError.value(source.type, 'source', '不是本地挂载源');
     }
     final documents = await _platform.scanTree(source.endpoint);
+    // 部分 SAF 提供者不返回修改时间。显式刷新时不能把“未知”当成永久不变。
+    final scanRevision = _uuid.v4();
     final discoveries = <RemoteBookDiscovery>[];
     final imageGroups = <String, List<LocalMountDocument>>{};
     for (final document in documents) {
@@ -164,7 +166,9 @@ class LocalMountService {
             title: p.basenameWithoutExtension(document.name),
             remoteUri: document.uri,
             mediaType: 'application/vnd.comicbook+zip',
-            etag: '${document.size}:${document.lastModified}',
+            etag: document.lastModified > 0
+                ? '${document.size}:${document.lastModified}'
+                : 'unverified:$scanRevision:${document.size}',
             byteSize: document.size,
           ),
         );
@@ -182,12 +186,15 @@ class LocalMountService {
       final signature = pages
           .map((page) => '${page.name}:${page.size}:${page.lastModified}')
           .join('|');
+      final revision = pages.any((page) => page.lastModified <= 0)
+          ? '$scanRevision:$signature'
+          : signature;
       discoveries.add(
         RemoteBookDiscovery(
           title: title,
           remoteUri: group.key,
           mediaType: folderMediaType,
-          etag: sha1.convert(utf8.encode(signature)).toString(),
+          etag: sha1.convert(utf8.encode(revision)).toString(),
           byteSize: pages.fold(0, (total, page) => total + page.size),
         ),
       );

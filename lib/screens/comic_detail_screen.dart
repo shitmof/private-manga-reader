@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/library_repository.dart';
 import '../state/app_controller.dart';
 import '../theme.dart';
 import '../widgets/formatters.dart';
@@ -157,7 +158,9 @@ class ComicDetailScreen extends StatelessWidget {
                       leading: const Icon(Icons.add_photo_alternate_outlined),
                       title: const Text('追加图片'),
                       subtitle: const Text('新图片默认添加到末尾'),
-                      enabled: summary.itemCount < 1000,
+                      enabled:
+                          summary.itemCount <
+                          LibraryRepository.maxItemsPerComic,
                       onTap: () async {
                         await runImportFlow(
                           context: context,
@@ -194,7 +197,7 @@ class ComicDetailScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               Text(
-                '创建于 ${formatDate(comic.createdAt)} · 最多 1000 张',
+                '创建于 ${formatDate(comic.createdAt)} · 最多 ${LibraryRepository.maxItemsPerComic} 张',
                 textAlign: TextAlign.center,
                 style: Theme.of(
                   context,
@@ -285,14 +288,7 @@ class ComicDetailScreen extends StatelessWidget {
   Future<void> _exportComic(BuildContext context, {required bool share}) async {
     final summary = controller.summaryFor(comicId);
     if (summary == null || summary.itemCount == 0) return;
-    if (summary.comic.isPrivate && !await controller.unlockPrivateShelf()) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('未通过身份验证，未导出私密漫画')));
-      }
-      return;
-    }
+    // 生成前由 controller 统一重新验证，包括继承私密分组保护的漫画。
     if (!context.mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,

@@ -1,6 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../data/library_repository.dart';
 import '../models/entities.dart';
 import '../services/archive_import_service.dart';
 import '../state/app_controller.dart';
@@ -31,16 +32,28 @@ Future<NewArchiveImportResult?> runNewArchiveImportFlow({
     if (!context.mounted) return null;
     final insufficient =
         freeBytes != null && preparedSelection.decodedBytes > freeBytes;
+    final capacityError = LibraryRepository.importCapacityError(
+      existingItems: 0,
+      incomingItems: preparedSelection.totalPages,
+    );
+    final blocked = insufficient || capacityError != null;
     var title = preparedSelection.suggestedTitle;
     final choice = await showDialog<_NewArchiveChoice>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(insufficient ? '设备空间不足' : '导入为新漫画'),
+        scrollable: true,
+        title: Text(
+          capacityError != null
+              ? '所选页数超过单本容量'
+              : insufficient
+              ? '设备空间不足'
+              : '导入为新漫画',
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            if (!insufficient)
+            if (!blocked)
               TextFormField(
                 initialValue: title,
                 onChanged: (value) => title = value,
@@ -52,10 +65,11 @@ Future<NewArchiveImportResult?> runNewArchiveImportFlow({
               ),
             const SizedBox(height: 12),
             Text(
-              insufficient
-                  ? '解压后约需 ${formatBytes(preparedSelection.decodedBytes)}，当前可用 ${formatBytes(freeBytes)}。'
-                  : '${preparedSelection.archives.length} 个压缩包 · ${preparedSelection.totalPages} 张\n'
-                        '将使用原包队列和页面顺序自动建立书架。',
+              capacityError ??
+                  (insufficient
+                      ? '解压后约需 ${formatBytes(preparedSelection.decodedBytes)}，当前可用 ${formatBytes(freeBytes)}。'
+                      : '${preparedSelection.archives.length} 个压缩包 · ${preparedSelection.totalPages} 张\n'
+                            '将使用原包队列和页面顺序自动建立书架。'),
             ),
           ],
         ),
@@ -64,7 +78,7 @@ Future<NewArchiveImportResult?> runNewArchiveImportFlow({
             onPressed: () => Navigator.pop(context),
             child: const Text('取消'),
           ),
-          if (!insufficient)
+          if (!blocked)
             TextButton(
               onPressed: () {
                 final normalized = title.trim();
@@ -77,7 +91,7 @@ Future<NewArchiveImportResult?> runNewArchiveImportFlow({
               },
               child: const Text('保留重复'),
             ),
-          if (!insufficient)
+          if (!blocked)
             FilledButton(
               onPressed: () {
                 final normalized = title.trim();
@@ -168,24 +182,44 @@ Future<ImportReport?> runImportFlow({
   final freeBytes = await controller.freeBytes();
   if (!context.mounted) return null;
   final insufficient = freeBytes != null && estimatedBytes > freeBytes;
+  final existingItems =
+      controller.library
+          .where((summary) => summary.comic.id == comicId)
+          .firstOrNull
+          ?.itemCount ??
+      0;
+  final capacityError = LibraryRepository.importCapacityError(
+    existingItems: existingItems,
+    incomingItems: files.length,
+  );
+  final blocked = insufficient || capacityError != null;
   final policy = await showDialog<DuplicatePolicy>(
     context: context,
     builder: (context) => AlertDialog(
-      title: Text(insufficient ? '设备空间不足' : '确认导入 ${files.length} 张图片'),
+      scrollable: true,
+      title: Text(
+        capacityError != null
+            ? '所选页数超过单本容量'
+            : insufficient
+            ? '设备空间不足'
+            : '确认导入 ${files.length} 张图片',
+      ),
       content: Text(
-        insufficient
-            ? '预计需要 ${formatBytes(estimatedBytes)}，当前可用 '
-                  '${formatBytes(freeBytes)}。请先释放空间。'
-            : '预计复制 ${formatBytes(estimatedBytes)} 到 App 私有目录。'
-                  '${freeBytes == null ? '' : '\n设备可用 ${formatBytes(freeBytes)}。'}'
-                  '\n\n如果当前漫画中出现内容完全相同的图片：',
+        capacityError ??
+            (insufficient
+                ? '预计需要 ${formatBytes(estimatedBytes)}，当前可用 '
+                      '${formatBytes(freeBytes)}。请先释放空间。'
+                : '预计复制 ${formatBytes(estimatedBytes)} 到 App 私有目录。'
+                      '${freeBytes == null ? '' : '\n设备可用 ${formatBytes(freeBytes)}。'}'
+                      '\n已有 $existingItems 张，本次最多追加 ${files.length} 张，单本上限 ${LibraryRepository.maxItemsPerComic} 张。'
+                      '\n\n如果当前漫画中出现内容完全相同的图片：'),
       ),
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('取消'),
         ),
-        if (!insufficient) ...<Widget>[
+        if (!blocked) ...<Widget>[
           TextButton(
             onPressed: () => Navigator.pop(context, DuplicatePolicy.keep),
             child: const Text('仍然导入'),
@@ -217,12 +251,12 @@ Future<ImportReport?> runImportFlow({
     );
     if (!context.mounted) return aggregate;
     final failureDetails = report.failures
-        .take(4)
         .map((failure) => '${failure.fileName}：${failure.reason}')
         .join('\n');
     final retry = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: Text(report.failures.isEmpty ? '导入完成' : '部分图片导入失败'),
         content: Text(
           '成功 $imported 张'
@@ -274,6 +308,17 @@ Future<ImportReport?> _runArchiveImportFlow({
     if (!context.mounted) return null;
     final insufficient =
         freeBytes != null && preparedSelection.decodedBytes > freeBytes;
+    final existingItems =
+        controller.library
+            .where((summary) => summary.comic.id == comicId)
+            .firstOrNull
+            ?.itemCount ??
+        0;
+    final capacityError = LibraryRepository.importCapacityError(
+      existingItems: existingItems,
+      incomingItems: preparedSelection.totalPages,
+    );
+    final blocked = insufficient || capacityError != null;
     final queue = preparedSelection.archives
         .take(5)
         .map(
@@ -287,27 +332,32 @@ Future<ImportReport?> _runArchiveImportFlow({
     final policy = await showDialog<DuplicatePolicy>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: Text(
-          insufficient
+          capacityError != null
+              ? '所选页数超过单本容量'
+              : insufficient
               ? '设备空间不足'
               : '确认导入 ${preparedSelection.archives.length} 个压缩包',
         ),
         content: Text(
-          insufficient
-              ? '解压后约需 ${formatBytes(preparedSelection.decodedBytes)}，当前可用 '
-                    '${formatBytes(freeBytes)}。请先释放空间。'
-              : '将按下列队列顺序连续追加：\n\n$queue$extra'
-                    '\n\n共 ${preparedSelection.totalPages} 张，解压后约 '
-                    '${formatBytes(preparedSelection.decodedBytes)}。'
-                    '\n文件名使用数字自然排序，ComicInfo.xml 顺序优先。'
-                    '\n\n当前漫画中出现内容完全相同的图片：',
+          capacityError ??
+              (insufficient
+                  ? '解压后约需 ${formatBytes(preparedSelection.decodedBytes)}，当前可用 '
+                        '${formatBytes(freeBytes)}。请先释放空间。'
+                  : '将按下列队列顺序连续追加：\n\n$queue$extra'
+                        '\n\n共 ${preparedSelection.totalPages} 张，解压后约 '
+                        '${formatBytes(preparedSelection.decodedBytes)}。'
+                        '\n已有 $existingItems 张，本次最多追加 ${preparedSelection.totalPages} 张，单本上限 ${LibraryRepository.maxItemsPerComic} 张。'
+                        '\n文件名使用数字自然排序，ComicInfo.xml 顺序优先。'
+                        '\n\n当前漫画中出现内容完全相同的图片：'),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('取消'),
           ),
-          if (!insufficient) ...<Widget>[
+          if (!blocked) ...<Widget>[
             TextButton(
               onPressed: () => Navigator.pop(context, DuplicatePolicy.keep),
               child: const Text('仍然导入'),
@@ -355,8 +405,7 @@ Future<ImportReport> _importPreparedSelection({
       comicId: comicId,
       selection: pending,
       duplicatePolicy: policy,
-      setCoverFromFirstArchive:
-          setCoverFromFirstArchive && pending.archives.first.sourceIndex == 0,
+      setCoverFromFirstArchive: setCoverFromFirstArchive,
     );
     imported += report.imported;
     skipped += report.skippedDuplicates;
@@ -389,6 +438,7 @@ Future<void> _showArchiveError(BuildContext context, Object error) =>
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: const Text('无法导入压缩包'),
         content: Text(error.toString().replaceFirst('FormatException: ', '')),
         actions: <Widget>[
@@ -413,16 +463,13 @@ Future<bool?> _showArchiveResult(BuildContext context, ImportReport report) {
   // 有失败或有扫描问题，都不能报「导入完成」。
   final hasProblems = report.hasProblems;
   final detail = <String>[
-    for (final failure in failures.take(4))
-      '${failure.fileName}：${failure.reason}',
-    for (final error in scanErrors.take(4)) error,
+    for (final failure in failures) '${failure.fileName}：${failure.reason}',
+    for (final error in scanErrors) error,
   ].join('\n');
-  final moreCount =
-      (failures.length + scanErrors.length) -
-      (failures.take(4).length + scanErrors.take(4).length);
   return showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
+      scrollable: true,
       title: Text(
         !hasProblems
             ? '压缩包导入完成'
@@ -436,7 +483,6 @@ Future<bool?> _showArchiveResult(BuildContext context, ImportReport report) {
         '${failures.isEmpty ? '' : '\n失败 ${failures.length} 个压缩包'}'
         '${scanErrors.isEmpty ? '' : '\n扫描问题 ${scanErrors.length} 项'}'
         '${hasProblems ? '\n\n$detail' : ''}'
-        '${moreCount > 0 ? '\n…另有 $moreCount 项' : ''}'
         '${failures.isEmpty ? '' : '\n\n失败压缩包已自动回滚，不会打乱后续顺序。'}',
       ),
       actions: <Widget>[

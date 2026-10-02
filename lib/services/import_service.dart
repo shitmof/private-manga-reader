@@ -61,15 +61,36 @@ class ImportService {
     var remaining =
         LibraryRepository.maxItemsPerComic -
         await _repository.itemCount(comicId);
+    final capacityError = LibraryRepository.importCapacityError(
+      existingItems: LibraryRepository.maxItemsPerComic - remaining,
+      incomingItems: files.length,
+    );
+    if (capacityError != null) {
+      return ImportReport(
+        imported: 0,
+        skippedDuplicates: 0,
+        failures: [
+          for (var index = 0; index < files.length; index++)
+            ImportFailure(files[index].name, capacityError, index),
+        ],
+      );
+    }
 
     for (var index = 0; index < files.length; index++) {
       final source = files[index];
       onProgress?.call(index, files.length, source.name);
       if (remaining <= 0) {
-        failures.add(ImportFailure(source.name, '已达到单本 1000 张上限', index));
+        failures.add(
+          ImportFailure(
+            source.name,
+            '已达到单本 ${LibraryRepository.maxItemsPerComic} 张上限',
+            index,
+          ),
+        );
         continue;
       }
       File? temporary;
+      File? createdOriginal;
       var createdPhysicalAsset = false;
       AssetRecord? createdAsset;
       try {
@@ -77,21 +98,36 @@ class ImportService {
         temporary = copied.file;
         final existing = await _repository.findAssetByHash(copied.hash);
         if (existing != null) {
+          // The hash identifies the source bytes, not the integrity of the
+          // previously stored copy. Repair it before even skipping duplicates.
+          (int, int)? recoveredDimensions;
+          if (existing.width <= 0 || existing.height <= 0) {
+            recoveredDimensions = await _createThumbnail(
+              temporary,
+              copied.hash,
+            );
+          }
+          final existingFile = File(_storage.resolve(existing.storedPath));
+          final repaired = await _ensureStoredCopy(
+            temporary,
+            existingFile,
+            copied.hash,
+          );
+          if (repaired) await _createThumbnail(existingFile, copied.hash);
+          if (recoveredDimensions != null) {
+            await _repository.updateAssetDimensions(
+              existing.id,
+              recoveredDimensions.$1,
+              recoveredDimensions.$2,
+            );
+          }
           final alreadyUsed = await _repository.comicContainsAsset(
             comicId,
             existing.id,
           );
           if (alreadyUsed && duplicatePolicy == DuplicatePolicy.skip) {
             skipped++;
-            await temporary.delete();
             continue;
-          }
-          final existingFile = File(_storage.resolve(existing.storedPath));
-          if (!await existingFile.exists()) {
-            await existingFile.parent.create(recursive: true);
-            await temporary.rename(existingFile.path);
-          } else {
-            await temporary.delete();
           }
           await _repository.attachAsset(comicId: comicId, asset: existing);
           imported++;
@@ -108,6 +144,7 @@ class ImportService {
         } else {
           await temporary.rename(stored.path);
           createdPhysicalAsset = true;
+          createdOriginal = stored;
         }
         final verifiedHash = await _hashFile(stored);
         if (verifiedHash != copied.hash) {
@@ -135,9 +172,14 @@ class ImportService {
         if (temporary != null && await temporary.exists()) {
           await temporary.delete();
         }
-        if (createdPhysicalAsset && createdAsset != null) {
-          final original = File(_storage.resolve(createdAsset.storedPath));
-          final thumbnail = File(_storage.resolve(createdAsset.thumbnailPath));
+        if (createdPhysicalAsset && createdOriginal != null) {
+          final original = createdOriginal;
+          final thumbnail = File(
+            p.join(
+              _storage.thumbnailsDirectory.path,
+              '${p.basenameWithoutExtension(original.path)}.jpg',
+            ),
+          );
           if (await original.exists()) await original.delete();
           if (await thumbnail.exists()) await thumbnail.delete();
         }
@@ -173,16 +215,24 @@ class ImportService {
     final sink = temporary.openWrite();
     final digestSink = _DigestSink();
     final converter = sha256.startChunkedConversion(digestSink);
+    var converterClosed = false;
     try {
       await for (final Uint8List chunk in source.readAsByteStream()) {
         converter.add(chunk);
         sink.add(chunk);
       }
       converter.close();
+      converterClosed = true;
       await sink.close();
     } catch (_) {
-      converter.close();
-      await sink.close();
+      if (!converterClosed) converter.close();
+      try {
+        await sink.close();
+      } finally {
+        // The caller has not received this temporary file yet, so ownership
+        // and cleanup for a source-stream failure must stay here.
+        if (await temporary.exists()) await temporary.delete();
+      }
       rethrow;
     }
     final digest = digestSink.value;
@@ -193,9 +243,43 @@ class ImportService {
   Future<String> _hashFile(File file) async =>
       (await sha256.bind(file.openRead()).first).toString();
 
+  Future<bool> _ensureStoredCopy(
+    File source,
+    File target,
+    String expectedHash,
+  ) async {
+    if (await target.exists() && await _hashFile(target) == expectedHash) {
+      await source.delete();
+      return false;
+    }
+    await target.parent.create(recursive: true);
+    // Keep a damaged old copy until the verified replacement is in place;
+    // failed moves cannot make an existing library file disappear.
+    File? previous;
+    if (await target.exists()) {
+      previous = await target.rename('${target.path}.repair-${_uuid.v4()}');
+    }
+    try {
+      await source.rename(target.path);
+      if (await _hashFile(target) != expectedHash) {
+        throw const FileSystemException('恢复原图后哈希校验失败');
+      }
+    } catch (_) {
+      if (await target.exists()) await target.delete();
+      if (previous != null) await previous.rename(target.path);
+      rethrow;
+    }
+    if (previous != null) await previous.delete();
+    return true;
+  }
+
   Future<(int, int)> _createThumbnail(File original, String hash) async {
     final decoded = await img.decodeImageFile(original.path);
-    if (decoded == null) return (0, 0);
+    if (decoded == null) {
+      // HEIC / HEIF and other device-supported codecs may be unavailable in
+      // package:image. Ask the actual platform decoder before rejecting them.
+      return _platformDimensions(original);
+    }
     final width = decoded.width;
     final height = decoded.height;
     final thumbnail = width > 512
@@ -213,6 +297,22 @@ class ImportService {
     return (width, height);
   }
 
+  /// Also validates pages extracted for a mounted archive without making a
+  /// second permanent copy or assuming every platform codec exists in Dart.
+  Future<(int, int)> imageDimensions(File original) async {
+    final decoded = await img.decodeImageFile(original.path);
+    if (decoded != null) return (decoded.width, decoded.height);
+    return _platformDimensions(original);
+  }
+
+  Future<(int, int)> _platformDimensions(File original) async {
+    final dimensions = await _storage.probeImageDimensions(original.path);
+    if (dimensions != null && dimensions.$1 > 0 && dimensions.$2 > 0) {
+      return dimensions;
+    }
+    throw const FormatException('图片无效或当前设备无法解码');
+  }
+
   String _safeExtension(String? extension) {
     final normalized = (extension ?? 'img').toLowerCase();
     return RegExp(r'^[a-z0-9]{1,8}$').hasMatch(normalized) ? normalized : 'img';
@@ -220,6 +320,7 @@ class ImportService {
 
   String _friendlyError(Object error) {
     if (error is StateError) return error.message.toString();
+    if (error is FormatException) return error.message.toString();
     if (error is FileSystemException) return error.message;
     return '无法导入此文件';
   }

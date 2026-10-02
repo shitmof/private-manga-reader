@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -238,33 +239,36 @@ void main() {
     await tester.tap(find.byTooltip('批量管理'));
     await tester.tap(find.text('第一本'));
     await tester.pump();
-    var becamePrivate = false;
-    await tester.runAsync(() async {
-      await tester.tap(find.text('私密').last);
-      // 轮询等待落盘完成，不用固定延时：全量并行跑测试时磁盘写入明显更慢，
-      // 固定等待会偶发不足，导致断言读到旧状态而误报成“漫画还在”。
-      for (var i = 0; i < 400; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-        final updated = controller.library
-            .where((item) => item.comic.id == firstId)
-            .toList();
-        if (updated.isNotEmpty && updated.first.comic.isPrivate) {
-          becamePrivate = true;
-          break;
-        }
+    final privacyRefreshed = Completer<void>();
+    void onPrivacyRefreshed() {
+      if (!privacyRefreshed.isCompleted &&
+          controller.library.any(
+            (item) => item.comic.id == firstId && item.comic.isPrivate,
+          )) {
+        privacyRefreshed.complete();
       }
-    });
-    expect(
-      becamePrivate,
-      isTrue,
-      reason: '标记私密未在等待时间内落盘，属于操作未完成，而不是“漫画仍显示”',
-    );
+    }
+
+    controller.addListener(onPrivacyRefreshed);
+    await tester.tap(find.text('私密').last);
+    // library 先赋值，后续还有 folders/shelfEntries/readingLists 查询。
+    // 等真实 refresh 通知，并驱动 widget 的 fake-async 队列与真实 SQLite I/O。
+    // 不能把中间字段变化或固定延时误认为整个操作已完成。
+    for (
+      var attempt = 0;
+      attempt < 400 && !privacyRefreshed.isCompleted;
+      attempt++
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+    }
+    controller.removeListener(onPrivacyRefreshed);
+    expect(privacyRefreshed.isCompleted, isTrue, reason: '私密操作必须完整刷新后才能验收');
     // 必须等切换动画走完再断言：书架用 AnimatedSwitcher 承载作用域内容，
     // 过渡期间会同时保留新旧子树，此时仍能找到正在淡出的旧卡片。
     //
-    // 注意：本用例在全量并行执行（flutter test 默认并发）下仍偶发失败，
-    // 串行执行（--concurrency 1）稳定通过。属于测试环境并发问题，
-    // 应用行为本身已由断言点的状态与渲染内容确认正确。
     await tester.pumpAndSettle();
     expect(find.text('第一本'), findsNothing);
 
@@ -374,10 +378,7 @@ void main() {
 
     // 前台统一用“分组”表示拖动形成的容器；标题与确认按钮同文案。
     expect(find.text('新建分组'), findsNWidgets(2));
-    expect(
-      find.text('是否将《拖动来源》和《合组目标》放入一个分组？'),
-      findsOneWidget,
-    );
+    expect(find.text('是否将《拖动来源》和《合组目标》放入一个分组？'), findsOneWidget);
     expect(
       find.byKey(const ValueKey<String>('shelf-group-composer-sheet')),
       findsOneWidget,

@@ -101,7 +101,10 @@ void main() {
     _setPhoneView(tester);
     try {
       await _openEditor(tester, controller, comic);
-      expect(find.text('3 / 1000 张'), findsOneWidget);
+      expect(
+        find.text('3 / ${LibraryRepository.maxItemsPerComic} 张'),
+        findsOneWidget,
+      );
 
       final secondPage = _pageSelector('第 2 张');
       _expectLabels(tester, '当前语义标签');
@@ -115,7 +118,10 @@ void main() {
       expect(find.text('删除选中的 1 张图片？'), findsOneWidget);
       await tester.tap(find.widgetWithText(FilledButton, '删除'));
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.text('2 / 1000 张'), findsOneWidget);
+      expect(
+        find.text('2 / ${LibraryRepository.maxItemsPerComic} 张'),
+        findsOneWidget,
+      );
 
       await _saveAndWait(tester);
       final savedItems = await tester.runAsync(
@@ -133,7 +139,10 @@ void main() {
     _setPhoneView(tester);
     try {
       await _openEditor(tester, controller, comic);
-      expect(find.text('3 / 1000 张'), findsOneWidget);
+      expect(
+        find.text('3 / ${LibraryRepository.maxItemsPerComic} 张'),
+        findsOneWidget,
+      );
 
       final firstPage = _pageSelector('第 1 张');
       final thirdPage = _pageSelector('第 3 张');
@@ -150,7 +159,10 @@ void main() {
       expect(find.text('删除选中的 2 张图片？'), findsOneWidget);
       await tester.tap(find.widgetWithText(FilledButton, '删除'));
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.text('1 / 1000 张'), findsOneWidget);
+      expect(
+        find.text('1 / ${LibraryRepository.maxItemsPerComic} 张'),
+        findsOneWidget,
+      );
 
       await _saveAndWait(tester);
       final savedItems = (await tester.runAsync(
@@ -169,7 +181,10 @@ void main() {
     _setPhoneView(tester);
     try {
       await _openEditor(tester, controller, comic);
-      expect(find.text('3 / 1000 张'), findsOneWidget);
+      expect(
+        find.text('3 / ${LibraryRepository.maxItemsPerComic} 张'),
+        findsOneWidget,
+      );
 
       await tester.tap(_pageSelector('第 2 张'));
       await tester.pump(const Duration(milliseconds: 200));
@@ -180,7 +195,10 @@ void main() {
       expect(find.text('删除选中的 1 张图片？'), findsOneWidget);
       await tester.tap(find.widgetWithText(FilledButton, '删除'));
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.text('2 / 1000 张'), findsOneWidget);
+      expect(
+        find.text('2 / ${LibraryRepository.maxItemsPerComic} 张'),
+        findsOneWidget,
+      );
 
       // 取消编辑：编辑草稿被丢弃，不落库。
       await tester.tap(find.text('取消'));
@@ -201,7 +219,10 @@ void main() {
     _setPhoneView(tester);
     try {
       await _openEditor(tester, controller, comic);
-      expect(find.text('3 / 1000 张'), findsOneWidget);
+      expect(
+        find.text('3 / ${LibraryRepository.maxItemsPerComic} 张'),
+        findsOneWidget,
+      );
 
       await tester.tap(_pageSelector('第 2 张'));
       await tester.pump(const Duration(milliseconds: 200));
@@ -219,7 +240,10 @@ void main() {
         () => Future<void>.delayed(const Duration(milliseconds: 300)),
       );
       await tester.pump();
-      expect(find.text('2 / 1000 张'), findsOneWidget);
+      expect(
+        find.text('2 / ${LibraryRepository.maxItemsPerComic} 张'),
+        findsOneWidget,
+      );
       final savedItems = await tester.runAsync(
         () => repository.loadItems(comic.id),
       );
@@ -235,7 +259,10 @@ void main() {
     _setPhoneView(tester);
     try {
       await _openEditor(tester, controller, comic);
-      expect(find.text('3 / 1000 张'), findsOneWidget);
+      expect(
+        find.text('3 / ${LibraryRepository.maxItemsPerComic} 张'),
+        findsOneWidget,
+      );
 
       final third = _pageSelector('第 3 张');
       final first = _pageSelector('第 1 张');

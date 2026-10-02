@@ -9,7 +9,21 @@ import 'app_database.dart';
 class LibraryRepository {
   LibraryRepository(this._database);
 
-  static const maxItemsPerComic = 1000;
+  static const maxItemsPerComic = 10000;
+
+  static String? importCapacityError({
+    required int existingItems,
+    required int incomingItems,
+  }) {
+    if (existingItems + incomingItems <= maxItemsPerComic) return null;
+    final remaining = (maxItemsPerComic - existingItems).clamp(
+      0,
+      maxItemsPerComic,
+    );
+    return '单本最多 $maxItemsPerComic 张：已有 $existingItems 张，本次选择 $incomingItems 张，'
+        '合计 ${existingItems + incomingItems} 张，最多还能追加 $remaining 张。请减少选择或分册导入。';
+  }
+
   static const _uuid = Uuid();
   final AppDatabase _database;
 
@@ -756,6 +770,23 @@ class LibraryRepository {
     return rows.isEmpty ? null : AssetRecord.fromMap(rows.first);
   }
 
+  Future<void> updateAssetDimensions(
+    String assetId,
+    int width,
+    int height,
+  ) async {
+    if (width <= 0 || height <= 0) {
+      throw ArgumentError('图片尺寸必须大于 0');
+    }
+    final db = await _database.instance;
+    await db.update(
+      'assets',
+      {'width': width, 'height': height},
+      where: 'id = ?',
+      whereArgs: [assetId],
+    );
+  }
+
   Future<bool> comicContainsAsset(String comicId, String assetId) async {
     final db = await _database.instance;
     final rows = await db.rawQuery(
@@ -915,6 +946,44 @@ class LibraryRepository {
           whereArgs: <Object?>[remaining[index]['id']],
         );
       }
+    });
+  }
+
+  /// Remove a failed import batch and compact the destination only once.
+  /// Individual page deletion would repeatedly renumber every remaining page.
+  Future<void> removeItems(String comicId, List<String> itemIds) async {
+    if (itemIds.isEmpty) return;
+    final db = await _database.instance;
+    await db.transaction((txn) async {
+      for (var start = 0; start < itemIds.length; start += 500) {
+        final chunk = itemIds.sublist(
+          start,
+          (start + 500).clamp(0, itemIds.length),
+        );
+        await txn.delete(
+          'comic_items',
+          where:
+              'comic_id = ? AND id IN (${List.filled(chunk.length, '?').join(',')})',
+          whereArgs: <Object?>[comicId, ...chunk],
+        );
+      }
+      final remaining = await txn.query(
+        'comic_items',
+        columns: <String>['id'],
+        where: 'comic_id = ?',
+        whereArgs: <Object?>[comicId],
+        orderBy: 'position, created_at',
+      );
+      final batch = txn.batch();
+      for (var index = 0; index < remaining.length; index++) {
+        batch.update(
+          'comic_items',
+          {'position': index},
+          where: 'id = ? AND comic_id = ?',
+          whereArgs: [remaining[index]['id'], comicId],
+        );
+      }
+      await batch.commit(noResult: true);
     });
   }
 

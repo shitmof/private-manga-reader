@@ -116,6 +116,12 @@ val verifiedCertificate: String? = if (resolvedStore != null && expectReleaseSig
             "key.properties 缺少 expectedCertSha256。\n" +
                 "必须固定预期证书指纹，否则换错密钥也能构建成功。",
         )
+    // 官方发布渠道不可仅随本地 key.properties 改变，否则两把密钥都能各自通过校验。
+    // 与当前 GitHub v1.6.2 以及 v1.4/v1.5 实际 APK 证书一致。
+    val officialCertificate = "3724690E26BAE1597AD10221C10F2B2B15ADE2A5BFDBAF408834DC46EAACE1A5"
+    check(expected.equals(officialCertificate, ignoreCase = true)) {
+        "发布渠道证书必须与已发布 APK 一致。当前本地签名配置属于另一渠道，已停止构建。"
+    }
     val actual = readCertificateSha256(
         store = resolvedStore,
         storePassword = keyProperties["storePassword"] ?: "android",

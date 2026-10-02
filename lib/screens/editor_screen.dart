@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/library_repository.dart';
 import '../models/entities.dart';
 import '../state/app_controller.dart';
 import '../theme.dart';
@@ -84,7 +85,7 @@ class _EditorScreenState extends State<EditorScreen> {
               Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
               Text(
                 _selectedItemIds.isEmpty
-                    ? '${_items.length} / 1000 张'
+                    ? '${_items.length} / ${LibraryRepository.maxItemsPerComic} 张'
                     : '已选择 ${_selectedItemIds.length} 张',
                 style: TextStyle(
                   fontSize: 11,
@@ -159,7 +160,7 @@ class _EditorScreenState extends State<EditorScreen> {
               ),
         bottomNavigationBar: _EditorToolbar(
           hasSelection: _selectedItemIds.isNotEmpty,
-          canAdd: _items.length < 1000,
+          canAdd: _items.length < LibraryRepository.maxItemsPerComic,
           onAscending: _sortAscending,
           onDescending: _reverse,
           onAdd: _addImages,

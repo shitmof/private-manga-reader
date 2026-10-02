@@ -24,6 +24,9 @@ import 'package:private_manga_reader/services/storage_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  // 此文件验证真实回环 HTTP 服务，移除 widget Binding 默认的 HTTP 400 替身。
+  HttpOverrides.global = null;
   sqfliteFfiInit();
 
   late Directory sandbox;
@@ -294,7 +297,7 @@ void main() {
     expect(await migrated.loadDeletedComics(), isEmpty);
   });
 
-  test('1000 张可重排且第 1001 张被产品上限拦截', () async {
+  test('1000 张可重排，第 1001 张可追加且第 10001 张被产品上限拦截', () async {
     final comic = await repository.createComic('千图测试');
     final asset = AssetRecord(
       id: 'asset-1',
@@ -322,10 +325,32 @@ void main() {
     final reversed = await repository.loadItems(comic.id);
     expect(reversed.first.id, items.last.id);
     expect(reversed.last.id, items.first.id);
+    await repository.attachAsset(comicId: comic.id, asset: asset);
+    expect((await repository.loadItems(comic.id)), hasLength(1001));
+
+    // 通过同一真实数据库批量准备边界；追加与拒绝仍由实际产品接口执行。
+    const maximumPages = 10000;
+    expect(LibraryRepository.maxItemsPerComic, maximumPages);
+    final db = await database.instance;
+    await db.transaction((txn) async {
+      final batch = txn.batch();
+      for (var index = 1001; index < maximumPages; index++) {
+        batch.insert('comic_items', <String, Object?>{
+          'id': 'limit-fixture-$index',
+          'comic_id': comic.id,
+          'asset_id': asset.id,
+          'position': index,
+          'created_at': asset.createdAt.toUtc().toIso8601String(),
+        });
+      }
+      await batch.commit(noResult: true);
+    });
+    expect((await repository.loadItems(comic.id)), hasLength(maximumPages));
     await expectLater(
       repository.attachAsset(comicId: comic.id, asset: asset),
       throwsA(isA<StateError>()),
     );
+    expect((await repository.loadItems(comic.id)), hasLength(maximumPages));
   }, timeout: const Timeout(Duration(minutes: 2)));
 
   test('用户可以创建文件夹、移入漫画并在删除文件夹后保留漫画', () async {

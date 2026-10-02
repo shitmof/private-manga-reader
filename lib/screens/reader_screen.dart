@@ -37,6 +37,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   bool _controlsVisible = false;
   int _currentIndex = 0;
   double _lastLayoutWidth = 0;
+  double _lastLayoutGap = -1;
+  (String, double)? _layoutAnchor;
+  int _layoutRevision = 0;
   PageOffsetIndex _offsetIndex = PageOffsetIndex.fromExtents(
     const <double>[],
     gap: 0,
@@ -58,8 +61,13 @@ class _ReaderScreenState extends State<ReaderScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.controller.addListener(_handleControllerChange);
     _scrollController.addListener(_handleScroll);
     _load();
+  }
+
+  void _handleControllerChange() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _load() async {
@@ -82,8 +90,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       _loading = false;
       _loadError = null;
     });
-    if (widget.controller.summaryFor(widget.comicId)?.comic.isPrivate ??
-        false) {
+    if (!_holdsGuard && widget.controller.isComicPrivate(widget.comicId)) {
       _holdsGuard = true;
       await PrivateScreenGuard.acquireSecure();
     }
@@ -102,6 +109,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.controller.removeListener(_handleControllerChange);
     _scrollController.removeListener(_handleScroll);
     unawaited(_saveProgress());
     unawaited(_restoreSystemBrightness());
@@ -265,14 +273,49 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   void _ensureOffsetIndex(double width, double gap) {
-    if (_lastLayoutWidth == width && _offsetIndex.pageCount == _items.length) {
+    if (_lastLayoutWidth == width &&
+        _lastLayoutGap == gap &&
+        _offsetIndex.pageCount == _items.length) {
       return;
     }
+    // 版式变化保留正在看的稳定条目与页内偏移，不能重新读取旧落盘进度。
+    if (_layoutAnchor == null &&
+        _offsetIndex.pageCount > 0 &&
+        _items.isNotEmpty &&
+        _scrollController.hasClients) {
+      final page = _currentIndex.clamp(0, _items.length - 1);
+      final within =
+          (_scrollController.offset - _offsetIndex.offsetForPage(page)).clamp(
+            0.0,
+            double.infinity,
+          );
+      _layoutAnchor = (_items[page].id, within);
+    }
     _lastLayoutWidth = width;
+    _lastLayoutGap = gap;
     _offsetIndex = PageOffsetIndex.fromExtents(
       _items.map((item) => _displayHeight(item, width)).toList(),
       gap: gap,
     );
+    if (_layoutAnchor == null) return;
+    final revision = ++_layoutRevision;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          revision != _layoutRevision ||
+          !_scrollController.hasClients) {
+        return;
+      }
+      final anchor = _layoutAnchor;
+      if (anchor == null) return;
+      final page = _items.indexWhere((item) => item.id == anchor.$1);
+      _layoutAnchor = null;
+      if (page < 0) return;
+      final offset = _offsetIndex.offsetForPage(page) + anchor.$2;
+      _scrollController.jumpTo(
+        offset.clamp(0.0, _scrollController.position.maxScrollExtent),
+      );
+      _handleScroll();
+    });
   }
 
   void _restoreProgress() {
@@ -291,7 +334,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   void _handleScroll() {
-    if (_items.isEmpty || _lastLayoutWidth <= 0) return;
+    if (_items.isEmpty || _lastLayoutWidth <= 0 || _layoutAnchor != null) {
+      return;
+    }
     final index = _offsetIndex.pageAtOffset(_scrollController.offset + 1);
     if (index != _currentIndex && mounted) {
       setState(() => _currentIndex = index);
@@ -300,6 +345,14 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   Future<void> _saveProgress() async {
     if (_items.isEmpty || _lastLayoutWidth <= 0) return;
+    final anchor = _layoutAnchor;
+    if (anchor != null) {
+      final page = _items.indexWhere((item) => item.id == anchor.$1);
+      if (page >= 0) {
+        await widget.controller.saveProgress(widget.comicId, page, anchor.$2);
+      }
+      return;
+    }
     final top = _offsetIndex.offsetForPage(_currentIndex);
     final within = _scrollController.hasClients
         ? (_scrollController.offset - top).clamp(0.0, double.infinity)
@@ -326,9 +379,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   Future<void> _promptPageInput() async {
     final total = _items.length;
     if (total == 0) return;
-    final controller = TextEditingController(
-      text: '${_currentIndex + 1}',
-    );
+    final controller = TextEditingController(text: '${_currentIndex + 1}');
     final input = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -343,8 +394,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             labelText: '页码',
             helperText: '本漫画共 $total 页',
           ),
-          onSubmitted: (value) =>
-              Navigator.of(dialogContext).pop(value),
+          onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
         ),
         actions: <Widget>[
           TextButton(
@@ -408,11 +458,8 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     await showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
-      // 夜间阅读时面板跟随夜间底色，其余一律白色。
-      backgroundColor: surfaceMode == ReaderSurfaceMode.night
-          ? const Color(0xFF20242A)
-          : ShelfColors.surface,
+      showDragHandle: false,
+      backgroundColor: Colors.transparent,
       builder: (context) => StatefulBuilder(
         builder: (context, setSheetState) {
           final night = surfaceMode == ReaderSurfaceMode.night;
@@ -432,214 +479,249 @@ class _ReaderScreenState extends State<ReaderScreen>
             ),
           );
 
-          return SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  const Text(
-                    '阅读设置',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                  ),
-
-                  // —— 阅读背景 ——
-                  sectionLabel('阅读背景'),
-                  SegmentedButton<ReaderSurfaceMode>(
-                    showSelectedIcon: false,
-                    segments: const <ButtonSegment<ReaderSurfaceMode>>[
-                      ButtonSegment(
-                        value: ReaderSurfaceMode.paper,
-                        icon: Icon(Icons.light_mode_outlined),
-                        label: Text('画纸'),
-                      ),
-                      ButtonSegment(
-                        value: ReaderSurfaceMode.night,
-                        icon: Icon(Icons.dark_mode_outlined),
-                        label: Text('夜间'),
-                      ),
-                    ],
-                    selected: <ReaderSurfaceMode>{surfaceMode},
-                    onSelectionChanged: (selection) {
-                      surfaceMode = selection.first;
-                      setSheetState(() {});
-                      apply((c) => c.copyWith(surfaceMode: surfaceMode));
-                      if (mounted) setState(() {});
-                    },
-                  ),
-
-                  // —— 亮度 ——
-                  sectionLabel('亮度'),
-                  SwitchListTile(
-                    key: const ValueKey<String>('reader-auto-brightness'),
-                    contentPadding: EdgeInsets.zero,
-                    value: autoBrightness,
-                    activeThumbColor: foreground,
-                    secondary: Icon(
-                      Icons.brightness_auto_outlined,
-                      color: secondary,
-                    ),
-                    title: Text(
-                      '跟随手机亮度',
-                      style: TextStyle(color: foreground),
-                    ),
-                    subtitle: Text(
-                      autoBrightness
-                          ? '当前使用手机自身亮度，下方滑块不生效'
-                          : '使用应用内固定亮度，不随手机变化',
-                      style: TextStyle(color: secondary, fontSize: 12),
-                    ),
-                    onChanged: (value) {
-                      autoBrightness = value;
-                      setSheetState(() {});
-                      apply((c) => c.copyWith(followSystemBrightness: value));
-                      if (value) {
-                        // 交还控制权给系统，避免残留应用级覆盖。
-                        _releaseBrightnessOverride();
-                      } else {
-                        _applyBrightness(brightness);
-                      }
-                    },
-                  ),
-                  Row(
+          // 面板表面、文字和全部控件使用同一次重建后的阅读主题。
+          return Theme(
+            data: buildShelfTheme(night ? Brightness.dark : Brightness.light),
+            child: Material(
+              color: night ? const Color(0xFF20242A) : ShelfColors.surface,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: SafeArea(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Icon(Icons.brightness_low, color: secondary),
-                      Expanded(
-                        child: Slider(
-                          key: const ValueKey<String>('reader-brightness'),
-                          value: brightness,
-                          min: 0.05,
-                          max: 1,
-                          onChanged: autoBrightness
-                              ? null
-                              : (value) {
-                                  brightness = value;
-                                  setSheetState(() {});
-                                  _applyBrightness(value);
-                                },
-                          onChangeEnd: (value) => apply(
-                            (c) => c.copyWith(
-                              readerBrightness: value,
-                              followSystemBrightness: false,
-                            ),
+                      Center(
+                        child: Container(
+                          width: 32,
+                          height: 4,
+                          margin: const EdgeInsets.symmetric(vertical: 12),
+                          decoration: BoxDecoration(
+                            color: secondary.withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(2),
                           ),
                         ),
                       ),
-                      Icon(Icons.brightness_high, color: secondary),
-                    ],
-                  ),
-
-                  // —— 版式 ——
-                  sectionLabel('版式'),
-                  Row(
-                    children: <Widget>[
-                      Icon(Icons.space_bar_rounded, color: secondary),
-                      Expanded(
-                        child: Slider(
-                          key: const ValueKey<String>('reader-image-gap'),
-                          value: imageGap.clamp(0, 10),
-                          min: 0,
-                          max: 10,
-                          divisions: 10,
-                          label: '${imageGap.round()} dp',
-                          onChanged: (value) {
-                            imageGap = value;
-                            setSheetState(() {});
-                            apply((c) => c.copyWith(imageGap: value));
-                          },
+                      Text(
+                        '阅读设置',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: foreground,
                         ),
                       ),
-                      SizedBox(
-                        width: 42,
-                        child: Text(
-                          '${imageGap.round()} dp',
-                          textAlign: TextAlign.right,
-                          style: TextStyle(color: secondary, fontSize: 12),
-                        ),
-                      ),
-                    ],
-                  ),
 
-                  // —— 阅读辅助 ——
-                  sectionLabel('阅读辅助'),
-                  SwitchListTile(
-                    key: const ValueKey<String>('reader-show-page-number'),
-                    contentPadding: EdgeInsets.zero,
-                    value: widget.controller.preferences.showPageNumber,
-                    activeThumbColor: foreground,
-                    secondary: Icon(Icons.tag_rounded, color: secondary),
-                    title: Text('显示页码', style: TextStyle(color: foreground)),
-                    onChanged: (value) {
-                      setSheetState(() {});
-                      apply((c) => c.copyWith(showPageNumber: value));
-                    },
-                  ),
-                  SwitchListTile(
-                    key: const ValueKey<String>('reader-scrubber-toggle'),
-                    contentPadding: EdgeInsets.zero,
-                    value: widget.controller.preferences.readerScrubber,
-                    activeThumbColor: foreground,
-                    secondary: Icon(
-                      Icons.vertical_align_center_rounded,
-                      color: secondary,
-                    ),
-                    title: Text(
-                      '快速定位条',
-                      style: TextStyle(color: foreground),
-                    ),
-                    subtitle: Text(
-                      '关闭后右侧定位热区不响应触摸，避免翻页误触',
-                      style: TextStyle(color: secondary, fontSize: 12),
-                    ),
-                    onChanged: (value) {
-                      setSheetState(() {});
-                      apply((c) => c.copyWith(readerScrubber: value));
-                    },
-                  ),
-                  SwitchListTile(
-                    key: const ValueKey<String>('reader-remember-progress'),
-                    contentPadding: EdgeInsets.zero,
-                    value: widget.controller.preferences.rememberProgress,
-                    activeThumbColor: foreground,
-                    secondary: Icon(Icons.history_rounded, color: secondary),
-                    title: Text(
-                      '记住阅读位置',
-                      style: TextStyle(color: foreground),
-                    ),
-                    onChanged: (value) {
-                      setSheetState(() {});
-                      apply((c) => c.copyWith(rememberProgress: value));
-                    },
-                  ),
-
-                  // —— 书签 ——
-                  sectionLabel('书签（${bookmarks.length}）'),
-                  if (bookmarks.isEmpty)
-                    Text(
-                      '还没有书签。阅读时点击顶部书签按钮即可收藏当前页。',
-                      style: TextStyle(color: secondary, fontSize: 12),
-                    )
-                  else
-                    SizedBox(
-                      height: 40,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: bookmarks.length,
-                        separatorBuilder: (_, _) => const SizedBox(width: 8),
-                        itemBuilder: (context, index) {
-                          final bookmark = bookmarks[index];
-                          return ActionChip(
-                            label: Text('第 ${bookmark.position + 1} 页'),
-                            onPressed: () {
-                              Navigator.pop(context);
-                              _jumpToPage(bookmark.position);
-                            },
-                          );
+                      // —— 阅读背景 ——
+                      sectionLabel('阅读背景'),
+                      SegmentedButton<ReaderSurfaceMode>(
+                        showSelectedIcon: false,
+                        segments: const <ButtonSegment<ReaderSurfaceMode>>[
+                          ButtonSegment(
+                            value: ReaderSurfaceMode.paper,
+                            icon: Icon(Icons.light_mode_outlined),
+                            label: Text('画纸'),
+                          ),
+                          ButtonSegment(
+                            value: ReaderSurfaceMode.night,
+                            icon: Icon(Icons.dark_mode_outlined),
+                            label: Text('夜间'),
+                          ),
+                        ],
+                        selected: <ReaderSurfaceMode>{surfaceMode},
+                        onSelectionChanged: (selection) {
+                          surfaceMode = selection.first;
+                          setSheetState(() {});
+                          apply((c) => c.copyWith(surfaceMode: surfaceMode));
+                          if (mounted) setState(() {});
                         },
                       ),
-                    ),
-                ],
+
+                      // —— 亮度 ——
+                      sectionLabel('亮度'),
+                      SwitchListTile(
+                        key: const ValueKey<String>('reader-auto-brightness'),
+                        contentPadding: EdgeInsets.zero,
+                        value: autoBrightness,
+                        activeThumbColor: foreground,
+                        secondary: Icon(
+                          Icons.brightness_auto_outlined,
+                          color: secondary,
+                        ),
+                        title: Text(
+                          '跟随手机亮度',
+                          style: TextStyle(color: foreground),
+                        ),
+                        subtitle: Text(
+                          autoBrightness
+                              ? '当前使用手机自身亮度，下方滑块不生效'
+                              : '使用应用内固定亮度，不随手机变化',
+                          style: TextStyle(color: secondary, fontSize: 12),
+                        ),
+                        onChanged: (value) {
+                          autoBrightness = value;
+                          setSheetState(() {});
+                          apply(
+                            (c) => c.copyWith(followSystemBrightness: value),
+                          );
+                          if (value) {
+                            // 交还控制权给系统，避免残留应用级覆盖。
+                            _releaseBrightnessOverride();
+                          } else {
+                            _applyBrightness(brightness);
+                          }
+                        },
+                      ),
+                      Row(
+                        children: <Widget>[
+                          Icon(Icons.brightness_low, color: secondary),
+                          Expanded(
+                            child: Slider(
+                              key: const ValueKey<String>('reader-brightness'),
+                              value: brightness,
+                              min: 0.05,
+                              max: 1,
+                              onChanged: autoBrightness
+                                  ? null
+                                  : (value) {
+                                      brightness = value;
+                                      setSheetState(() {});
+                                      _applyBrightness(value);
+                                    },
+                              onChangeEnd: (value) => apply(
+                                (c) => c.copyWith(
+                                  readerBrightness: value,
+                                  followSystemBrightness: false,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Icon(Icons.brightness_high, color: secondary),
+                        ],
+                      ),
+
+                      // —— 版式 ——
+                      sectionLabel('版式'),
+                      Row(
+                        children: <Widget>[
+                          Icon(Icons.space_bar_rounded, color: secondary),
+                          Expanded(
+                            child: Slider(
+                              key: const ValueKey<String>('reader-image-gap'),
+                              value: imageGap.clamp(0, 10),
+                              min: 0,
+                              max: 10,
+                              divisions: 10,
+                              label: '${imageGap.round()} dp',
+                              onChanged: (value) {
+                                imageGap = value;
+                                setSheetState(() {});
+                                apply((c) => c.copyWith(imageGap: value));
+                              },
+                            ),
+                          ),
+                          SizedBox(
+                            width: 42,
+                            child: Text(
+                              '${imageGap.round()} dp',
+                              textAlign: TextAlign.right,
+                              style: TextStyle(color: secondary, fontSize: 12),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      // —— 阅读辅助 ——
+                      sectionLabel('阅读辅助'),
+                      SwitchListTile(
+                        key: const ValueKey<String>('reader-show-page-number'),
+                        contentPadding: EdgeInsets.zero,
+                        value: widget.controller.preferences.showPageNumber,
+                        activeThumbColor: foreground,
+                        secondary: Icon(Icons.tag_rounded, color: secondary),
+                        title: Text(
+                          '显示页码',
+                          style: TextStyle(color: foreground),
+                        ),
+                        onChanged: (value) {
+                          setSheetState(() {});
+                          apply((c) => c.copyWith(showPageNumber: value));
+                        },
+                      ),
+                      SwitchListTile(
+                        key: const ValueKey<String>('reader-scrubber-toggle'),
+                        contentPadding: EdgeInsets.zero,
+                        value: widget.controller.preferences.readerScrubber,
+                        activeThumbColor: foreground,
+                        secondary: Icon(
+                          Icons.vertical_align_center_rounded,
+                          color: secondary,
+                        ),
+                        title: Text(
+                          '快速定位条',
+                          style: TextStyle(color: foreground),
+                        ),
+                        subtitle: Text(
+                          '关闭后右侧定位热区不响应触摸，避免翻页误触',
+                          style: TextStyle(color: secondary, fontSize: 12),
+                        ),
+                        onChanged: (value) {
+                          setSheetState(() {});
+                          apply((c) => c.copyWith(readerScrubber: value));
+                        },
+                      ),
+                      SwitchListTile(
+                        key: const ValueKey<String>('reader-remember-progress'),
+                        contentPadding: EdgeInsets.zero,
+                        value: widget.controller.preferences.rememberProgress,
+                        activeThumbColor: foreground,
+                        secondary: Icon(
+                          Icons.history_rounded,
+                          color: secondary,
+                        ),
+                        title: Text(
+                          '记住阅读位置',
+                          style: TextStyle(color: foreground),
+                        ),
+                        onChanged: (value) {
+                          setSheetState(() {});
+                          apply((c) => c.copyWith(rememberProgress: value));
+                        },
+                      ),
+
+                      // —— 书签 ——
+                      sectionLabel('书签（${bookmarks.length}）'),
+                      if (bookmarks.isEmpty)
+                        Text(
+                          '还没有书签。阅读时点击顶部书签按钮即可收藏当前页。',
+                          style: TextStyle(color: secondary, fontSize: 12),
+                        )
+                      else
+                        SizedBox(
+                          height: 40,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: bookmarks.length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(width: 8),
+                            itemBuilder: (context, index) {
+                              final bookmark = bookmarks[index];
+                              return ActionChip(
+                                label: Text('第 ${bookmark.position + 1} 页'),
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                  _jumpToPage(bookmark.position);
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ),
           );

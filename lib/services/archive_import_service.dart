@@ -4,7 +4,6 @@ import 'dart:typed_data';
 
 import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:image/image.dart' as img;
 import 'package:koni_archive/io.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
@@ -114,13 +113,8 @@ class ArchiveImportService {
             overflowErrors: errors,
           );
           prepared.addAll(outcome.archives);
-          // 统一登记本次产生的所有临时文件。
-          //
-          // 注意：不能把外层文件也挂到每本内层漫画的 ownedFiles 上。
-          // 外层临时文件是所有内层包共用的 localFile，
-          // 一旦某本漫画先完成导入并 dispose，就会把共用文件删掉，
-          // 导致后续漫画打开时失败（实测报 “Cannot open file”）。
-          // 因此清理只在 selection 层统一进行。
+          // 容器临时文件由整次选择统一持有，直到用户完成或取消重试。
+          // 混合包的多个散图批次可能共用 localFile，不能逐批清理。
           for (final file in ownedFiles) {
             allTemporaryFiles.putIfAbsent(file.path, () => file);
           }
@@ -172,8 +166,8 @@ class ArchiveImportService {
 
   /// 扫描一个已打开的压缩包。
   ///
-  /// 若它直接包含图片，就产出一本漫画；若只包含内层压缩包，
-  /// 就把每个内层包解出来递归扫描（用户常见的「外层 zip 套多话 cbz」）。
+  /// 按容器条目顺序展开内层包与连续散图段；每个散图段内部沿用
+  /// ComicInfo / 文件名自然排序。扫描结果是导入批次，不是新建的书。
   /// [ownedFiles] 收集本次扫描过程中产生的所有临时文件，供失败时统一清理。
   Future<_ScanOutcome> _scanArchive({
     required Archive archive,
@@ -193,12 +187,6 @@ class ArchiveImportService {
         .where((entry) => !_isIgnoredPath(entry.path))
         .toList(growable: false);
 
-    // 外层图片与内层包都要处理。
-    //
-    // 原先只要 archiveImages 非空就直接 return，不再扫描内层包；
-    // 因此外层放了 cover.jpg 的整包漫画，里面的 CBZ 会被**静默丢弃**。
-    // 现在按条目在压缩包中的先后顺序合并：外层图片作为一个条目，
-    // 内层包各自作为一个条目，顺序与用户在归档工具里看到的一致。
     final nested = archive.entries
         .where((entry) => entry.isFile && _isNestedArchivePath(entry.path))
         .where((entry) => !_isIgnoredPath(entry.path))
@@ -213,7 +201,9 @@ class ArchiveImportService {
 
     final results = <PreparedArchive>[];
 
-    // 1) 外层直接图片：合成一个条目，保持包内顺序。
+    var metadata = const _ComicInfo();
+    var orderedImages = <ArchiveEntry>[];
+    String? coverPath;
     if (archiveImages.isNotEmpty) {
       if (archiveImages.any((entry) => entry.isEncrypted)) {
         throw const FormatException('压缩包已加密，请先解除密码后导入');
@@ -225,20 +215,27 @@ class ArchiveImportService {
       if (decodedBytes > _maxTotalDecodedBytes) {
         throw const FormatException('解压后数据过大，已停止导入');
       }
-      final metadata = await _readComicInfo(archive, archiveImages);
-      final ordered = _orderImages(archiveImages, metadata.pageIndices);
-      final coverPath = metadata.coverArchiveIndex == null
+      metadata = await _readComicInfo(archive, archiveImages);
+      orderedImages = _orderImages(archiveImages, metadata.pageIndices);
+      coverPath = metadata.coverArchiveIndex == null
           ? null
-          : archiveImages
-                .elementAtOrNull(metadata.coverArchiveIndex!)
-                ?.path;
+          : archiveImages.elementAtOrNull(metadata.coverArchiveIndex!)?.path;
+    }
+
+    final pendingImages = <String>{};
+    void flushImages() {
+      if (pendingImages.isEmpty) return;
+      final ordered = orderedImages
+          .where((entry) => pendingImages.contains(entry.path))
+          .toList(growable: false);
+      final coverIndex = ordered.indexWhere((entry) => entry.path == coverPath);
       results.add(
         PreparedArchive(
           sourceIndex: sourceIndex,
           displayName: displayName,
           localFile: file,
           format: archive.format.name,
-          title: _titleFromName(displayName),
+          title: metadata.title ?? _titleFromName(displayName),
           pages: ordered
               .map(
                 (entry) => PreparedArchivePage(
@@ -247,26 +244,41 @@ class ArchiveImportService {
                 ),
               )
               .toList(growable: false),
-          coverPageIndex: coverPath == null
-              ? 0
-              : ordered.indexWhere((entry) => entry.path == coverPath),
-          decodedBytes: decodedBytes,
+          coverPageIndex: coverIndex < 0 ? 0 : coverIndex,
+          decodedBytes: ordered.fold<int>(
+            0,
+            (total, entry) => total + entry.uncompressedSize,
+          ),
         ),
       );
+      pendingImages.clear();
     }
 
-    // 2) 内层压缩包：逐个解出后递归扫描。
-    for (final entry in nested) {
+    // A nested archive separates loose-image batches; do not move all loose
+    // pages to the front (or collect a trailing page beside the cover).
+    for (final entry in archive.entries) {
+      if (!entry.isFile || _isIgnoredPath(entry.path)) continue;
+      if (_isImagePath(entry.path)) {
+        pendingImages.add(entry.path);
+        continue;
+      }
+      if (!_isNestedArchivePath(entry.path)) continue;
+      flushImages();
       if (results.length >= _maxNestedArchives) {
         overflowErrors.add(
           '${p.posix.basename(entry.path)}：内层压缩包数量超过 $_maxNestedArchives，已跳过',
         );
         break;
       }
-      final nestedFile = await _extractNestedArchive(archive, entry);
-      ownedFiles.add(nestedFile);
       Archive? nestedArchive;
       try {
+        // Extraction itself can fail mid-stream (CRC / storage errors). It
+        // belongs to the same per-package isolation as opening and scanning.
+        final nestedFile = await _extractNestedArchive(
+          archive,
+          entry,
+          ownedFiles,
+        );
         nestedArchive = await _open(nestedFile.path);
         final outcome = await _scanArchive(
           archive: nestedArchive,
@@ -287,6 +299,7 @@ class ArchiveImportService {
         await nestedArchive?.close();
       }
     }
+    flushImages();
 
     if (results.isEmpty) {
       throw FormatException(
@@ -300,7 +313,11 @@ class ArchiveImportService {
   ///
   /// 刻意逐块写入而不是一次性读入内存：内层包可能有数百 MB，
   /// 而 KonI 打开压缩包需要可随机读取的文件源。
-  Future<File> _extractNestedArchive(Archive archive, ArchiveEntry entry) async {
+  Future<File> _extractNestedArchive(
+    Archive archive,
+    ArchiveEntry entry,
+    List<File> ownedFiles,
+  ) async {
     final extension = p.posix.extension(entry.path).toLowerCase();
     final target = File(
       p.join(
@@ -308,19 +325,31 @@ class ArchiveImportService {
         'nested-${_uuid.v4()}${RegExp(r'^\.[a-z0-9]{1,5}$').hasMatch(extension) ? extension : '.bin'}',
       ),
     );
+    // Register before the first write, including incomplete output.
+    ownedFiles.add(target);
     final sink = target.openWrite();
     var written = 0;
     try {
-      await for (final chunk in archive.openRead(entry)) {
-        written += chunk.length;
-        if (written > _maxEntryBytes) {
-          throw const FormatException('内层压缩包过大，已停止导入');
+      try {
+        await for (final chunk in archive.openRead(entry)) {
+          written += chunk.length;
+          if (written > _maxEntryBytes) {
+            throw const FormatException('内层压缩包过大，已停止导入');
+          }
+          sink.add(chunk);
         }
-        sink.add(chunk);
+        await sink.flush();
+      } finally {
+        await sink.close();
       }
-      await sink.flush();
-    } finally {
-      await sink.close();
+    } catch (_) {
+      try {
+        if (await target.exists()) await target.delete();
+        ownedFiles.remove(target);
+      } on FileSystemException {
+        // Keep ownership so dispose can retry; retain the original read error.
+      }
+      rethrow;
     }
     return target;
   }
@@ -332,12 +361,36 @@ class ArchiveImportService {
     bool setCoverFromFirstArchive = false,
     ImportProgress? onProgress,
   }) async {
+    final pendingArchives = selection.archives
+        .where((archive) => !archive._importedItemIds.containsKey(comicId))
+        .toList(growable: false);
+    final capacityError = LibraryRepository.importCapacityError(
+      existingItems: await _repository.itemCount(comicId),
+      incomingItems: pendingArchives.fold(
+        0,
+        (total, archive) => total + archive.pages.length,
+      ),
+    );
+    if (capacityError != null) {
+      return ImportReport(
+        imported: 0,
+        skippedDuplicates: 0,
+        failures: [
+          for (final prepared in pendingArchives)
+            ImportFailure(
+              prepared.displayName,
+              capacityError,
+              prepared.sourceIndex,
+              archiveKey: prepared.archiveKey,
+            ),
+        ],
+        scanErrors: selection.errors,
+      );
+    }
     var imported = 0;
     var skipped = 0;
     var completed = 0;
     final failures = <ImportFailure>[];
-    final attemptedKeys = <String>{};
-    final startingItemCount = await _repository.itemCount(comicId);
     var firstArchiveCompleted = false;
 
     for (
@@ -346,7 +399,12 @@ class ArchiveImportService {
       archiveIndex++
     ) {
       final prepared = selection.archives[archiveIndex];
-      attemptedKeys.add(prepared.archiveKey);
+      // A retry shares the original queue and its completed item IDs. Never
+      // append a completed batch twice, including under DuplicatePolicy.keep.
+      if (prepared._importedItemIds.containsKey(comicId)) {
+        completed += prepared.pages.length;
+        continue;
+      }
       final beforeItems = await _repository.loadItems(comicId);
       final beforeIds = beforeItems.map((item) => item.id).toSet();
       var importedThisArchive = 0;
@@ -387,7 +445,16 @@ class ArchiveImportService {
             if (await extracted.exists()) await extracted.delete();
           }
         }
-        if (archiveIndex == 0) firstArchiveCompleted = true;
+        final importedIds = await _restoreArchivePosition(
+          comicId: comicId,
+          prepared: prepared,
+          queue: selection._orderedArchives,
+          beforeIds: beforeIds,
+        );
+        prepared._importedItemIds[comicId] = importedIds;
+        if (prepared == selection._orderedArchives.first) {
+          firstArchiveCompleted = true;
+        }
       } catch (error) {
         await _rollbackArchive(comicId, beforeIds);
         imported -= importedThisArchive;
@@ -401,10 +468,7 @@ class ArchiveImportService {
             archiveKey: prepared.archiveKey,
           ),
         );
-        // 继续处理后续压缩包，而不是 break。
-        //
-        // 原先这里直接 break：第一个包失败后，后面所有包都不会被尝试，
-        // 用户看到的结果就是「只导入了第一本」。
+        // 只回滚失败批次，其他批次继续；重试通过稳定条目 ID 恢复位置。
         continue;
       } finally {
         await archive?.close();
@@ -412,12 +476,17 @@ class ArchiveImportService {
     }
 
     if (setCoverFromFirstArchive && firstArchiveCompleted && imported > 0) {
-      final first = selection.archives.first;
+      final first = selection._orderedArchives.first;
       final coverIndex = first.coverPageIndex.clamp(0, first.pages.length - 1);
       final items = await _repository.loadItems(comicId);
-      final itemIndex = startingItemCount + coverIndex;
-      if (duplicatePolicy == DuplicatePolicy.keep && itemIndex < items.length) {
-        await _repository.setCover(comicId, items[itemIndex].asset.id);
+      final coverItemId = first._importedItemIds[comicId]?.elementAtOrNull(
+        coverIndex,
+      );
+      final coverItem = items
+          .where((item) => item.id == coverItemId)
+          .firstOrNull;
+      if (duplicatePolicy == DuplicatePolicy.keep && coverItem != null) {
+        await _repository.setCover(comicId, coverItem.asset.id);
       }
     }
     onProgress?.call(completed, selection.totalPages, '完成');
@@ -427,6 +496,48 @@ class ArchiveImportService {
       failures: failures,
       scanErrors: selection.errors,
     );
+  }
+
+  /// Insert a recovered batch before the next completed batch (or after the
+  /// preceding one). Anchors are item IDs, not page counts or asset hashes:
+  /// repeated images remain distinct and pre-existing pages keep their order.
+  Future<List<String>> _restoreArchivePosition({
+    required String comicId,
+    required PreparedArchive prepared,
+    required List<PreparedArchive> queue,
+    required Set<String> beforeIds,
+  }) async {
+    final current = await _repository.loadItems(comicId);
+    final addedIds = current
+        .where((item) => !beforeIds.contains(item.id))
+        .map((item) => item.id)
+        .toList(growable: false);
+    if (addedIds.isEmpty) return addedIds;
+    final addedSet = addedIds.toSet();
+    final remaining = current
+        .where((item) => !addedSet.contains(item.id))
+        .map((item) => item.id)
+        .toList();
+    final queueIndex = queue.indexOf(prepared);
+    final nextIds = queue
+        .skip(queueIndex + 1)
+        .expand((item) => item._importedItemIds[comicId] ?? const <String>[])
+        .toSet();
+    var insertion = remaining.indexWhere(nextIds.contains);
+    if (insertion < 0) {
+      final previousIds = queue
+          .take(queueIndex)
+          .expand((item) => item._importedItemIds[comicId] ?? const <String>[])
+          .toSet();
+      final previous = remaining.lastIndexWhere(previousIds.contains);
+      insertion = previous < 0 ? remaining.length : previous + 1;
+    }
+    if (insertion < remaining.length) {
+      remaining.insertAll(insertion, addedIds);
+      // The repository updates all positions in one database transaction.
+      await _repository.reorderItems(comicId, remaining);
+    }
+    return addedIds;
   }
 
   Future<List<ExtractedArchivePage>> extractPreparedToDirectory({
@@ -463,14 +574,14 @@ class ArchiveImportService {
           await sink.close();
           rethrow;
         }
-        final decoded = await img.decodeImageFile(file.path);
+        final dimensions = await _importer.imageDimensions(file);
         extracted.add(
           ExtractedArchivePage(
             file: file,
             originalName: p.posix.basename(page.path),
             byteSize: await file.length(),
-            width: decoded?.width ?? 0,
-            height: decoded?.height ?? 0,
+            width: dimensions.$1,
+            height: dimensions.$2,
           ),
         );
       }
@@ -543,9 +654,10 @@ class ArchiveImportService {
         .where((item) => !beforeItemIds.contains(item.id))
         .toList(growable: false);
     final candidateAssetIds = added.map((item) => item.asset.id).toSet();
-    for (final item in added) {
-      await _repository.removeItem(item.id);
-    }
+    await _repository.removeItems(
+      comicId,
+      added.map((item) => item.id).toList(growable: false),
+    );
     final newOrphans = (await _repository.orphanedAssets())
         .where((asset) => candidateAssetIds.contains(asset.id))
         .toList(growable: false);
@@ -699,9 +811,22 @@ class PreparedArchiveSelection {
     this.archives, {
     this.errors = const <String>[],
     this.temporaryFiles = const <File>[],
-  });
+  }) : _originalSelection = null;
+
+  PreparedArchiveSelection._retry(
+    PreparedArchiveSelection source,
+    Set<String> archiveKeys,
+  ) : archives = source.archives
+          .where((archive) => archiveKeys.contains(archive.archiveKey))
+          .toList(growable: false),
+      errors = source.errors,
+      temporaryFiles = source.temporaryFiles,
+      _originalSelection = source._originalSelection ?? source;
 
   final List<PreparedArchive> archives;
+  final PreparedArchiveSelection? _originalSelection;
+  List<PreparedArchive> get _orderedArchives =>
+      _originalSelection?.archives ?? archives;
 
   /// 部分内层压缩包未能导入的原因，逐项上报而不是只显示「失败」。
   final List<String> errors;
@@ -711,13 +836,7 @@ class PreparedArchiveSelection {
   /// 不能按 `sourceIndex` 筛选：同一外层包解出的内层包共用该值，
   /// 那样会把已经成功的包也选回来并重复追加。
   PreparedArchiveSelection retryOnly(Set<String> archiveKeys) =>
-      PreparedArchiveSelection(
-        archives
-            .where((archive) => archiveKeys.contains(archive.archiveKey))
-            .toList(growable: false),
-        errors: errors,
-        temporaryFiles: temporaryFiles,
-      );
+      PreparedArchiveSelection._retry(this, archiveKeys);
 
   /// 本次准备过程产生的全部临时文件。
   ///
@@ -773,9 +892,13 @@ class PreparedArchive {
   /// 同一外层包解出的多个内层包 `sourceIndex` 相同，
   /// 用它做重试筛选会把已成功的包也选回来。此标识每次扫描唯一。
   final String archiveKey = 'arc-${const Uuid().v4()}';
+
+  // In-memory state for this prepared import task, isolated per destination.
+  // Original images and database schemas are unchanged by retry tracking.
+  final Map<String, List<String>> _importedItemIds = <String, List<String>>{};
 }
 
-/// 一次压缩包扫描的结果：要么产出一本漫画，要么产出多个内层包对应的漫画。
+/// 扫描得到的有序导入批次；这些批次仍可进入同一本漫画。
 class _ScanOutcome {
   const _ScanOutcome(this.archives);
 
